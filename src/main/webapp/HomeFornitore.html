@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Area Fornitore - TIW</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1 th:text="'Ciao, ' + ${session.utente.nome} + ' ' + ${session.utente.cognome}">Ciao Fornitore</h1>
+        <a th:href="@{/GoToHomePage}"><button>Logout</button></a>
+    </div>
+
+    <div th:if="${errore != null}">
+        <p class="error-message" th:text="${errore}"></p>
+    </div>
+
+    <div class="container">
+    
+        <div class="column">
+            <h3>Crea SKU</h3>
+            <form action="CreateSku" method="POST">
+                <div class="form-group"><label>Codice</label><input type="text" name="codice" required></div>
+                <div class="form-group"><label>Nome</label><input type="text" name="nome" required></div>
+                <div class="form-group"><label>Foto (URL)</label><input type="text" name="foto"></div>
+                <div class="form-group"><label>Descrizione Tecnica</label><input type="text" name="descrizione"></div>
+                <div class="form-group"><label>Prezzo (€)</label><input type="number" step="1" name="prezzo" required></div>
+                <button type="submit">Salva SKU</button>
+            </form>
+        </div>
+
+        <div class="column">
+            <h3>Crea Prodotto Semplice</h3>
+            <form action="CreateProdottoSemplice" method="POST">
+                <div class="form-group"><label>Codice</label><input type="text" name="codice" required></div>
+                <div class="form-group"><label>Nome</label><input type="text" name="nome" required></div>
+                
+                <div class="form-group">
+                    <label>Seleziona SKU associate</label>
+                    <div class="scroll-box">
+                        <div th:each="sku : ${listaSkus}">
+                            <input type="checkbox" name="skuScelti" th:value="${sku.codice}" th:id="'sku_' + ${sku.codice}">
+                            <label th:for="'sku_' + ${sku.codice}" th:text="${sku.codice + ' - ' + sku.nome}"></label>
+                        </div>
+                        <div th:if="${#lists.isEmpty(listaSkus)}">
+                            <label>Nessuna SKU disponibile.</label>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit">Salva Prodotto</button>
+            </form>
+        </div>
+
+        <div class="column">
+            <h3>Crea Prodotto Composto</h3>
+            <form action="CreateProdottoComposto" method="POST">
+                <div class="form-group"><label>Codice</label><input type="text" name="codice" required></div>
+                <div class="form-group"><label>Nome</label><input type="text" name="nome" required></div>
+                <div class="form-group"><label>Descrizione</label><input type="text" name="descrizione"></div>
+                
+                <div class="form-row">
+                    <div class="form-group"><label>Prezzo Min</label><input type="number" step="0.01" name="p_min" required></div>
+                    <div class="form-group"><label>Prezzo Max</label><input type="number" step="0.01" name="p_max" required></div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Sottoprodotti</label>
+                    <div class="scroll-box">
+                        <div th:each="prod : ${listaProdotti}">
+                            <input type="checkbox" name="prodottiScelti" th:value="${prod.codice}" th:id="'prod_' + ${prod.codice}">
+                            <label th:for="'prod_' + ${prod.codice}" th:text="${prod.codice + ' - ' + prod.nome}"></label>
+                        </div>
+                        <div th:if="${#lists.isEmpty(listaProdotti)}">
+                            <label>Nessun prodotto disponibile.</label>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit">Salva Composto</button>
+            </form>
+        </div>
+        
+    </div>
+    
+    <div class="success-panel panel-sku" th:if="${dettaglioSku != null}">
+        <h3>Nuova SKU Creata</h3>
+        <ul>
+            <li><strong>Codice:</strong> <span th:text="${dettaglioSku.codice}"></span></li>
+            <li><strong>Nome:</strong> <span th:text="${dettaglioSku.nome}"></span></li>
+            <li><strong>Foto:</strong> <span th:text="${dettaglioSku.foto}"></span></li>
+            <li><strong>Descrizione Tecnica:</strong> <span th:text="${dettaglioSku.descrizione}"></span></li>
+            <li><strong>Prezzo:</strong> <span th:text="${dettaglioSku.prezzo} + ' €'"></span></li>
+        </ul>
+    </div>
+    
+    <div class="success-panel panel-semplice" th:if="${dettaglioProdSemplice != null}">
+        <h3>Nuovo Prodotto Semplice Creato</h3>
+        <ul>
+            <li><strong>Codice:</strong> <span th:text="${dettaglioProdSemplice.codice}"></span></li>
+            <li><strong>Nome:</strong> <span th:text="${dettaglioProdSemplice.nome}"></span></li>
+        </ul>
+        
+        <h4>SKU Associate:</h4>
+        <ul>
+            <li th:each="sku : ${skuAssociate}">
+                <span th:text="'[' + ${sku.codice} + '] ' + ${sku.nome} + ' (Prezzo: ' + ${sku.prezzo} + ' €)'"></span>
+            </li>
+        </ul>
+    </div>
+    
+    <div class="success-panel panel-composto" th:if="${dettaglioProdComposto != null}">
+        <h3>Nuovo Prodotto Composto Creato</h3>
+        <ul>
+            <li><strong>Codice:</strong> <span th:text="${dettaglioProdComposto.codice}"></span></li>
+            <li><strong>Nome:</strong> <span th:text="${dettaglioProdComposto.nome}"></span></li>
+            <li><strong>Descrizione:</strong> <span th:text="${dettaglioProdComposto.descrizione}"></span></li>
+            <li><strong>Fascia di prezzo:</strong> <span th:text="${dettaglioProdComposto.prezzoMin} + ' €  -  ' + ${dettaglioProdComposto.prezzoMax} + ' €'"></span></li>
+        </ul>
+        
+        <h4>Struttura Gerarchica:</h4>
+        <ul class="tree-container">
+            <th:block th:replace="~{::stampaAlbero(nodiGerarchia=${dettaglioProdComposto.componenti})}"></th:block>
+        </ul>
+    </div>
+    
+    <th:block th:fragment="stampaAlbero(nodiGerarchia)">
+        <li th:each="prod : ${nodiGerarchia}">
+            
+            <strong class="tree-title" th:text="${prod.nome} + ' (Codice: ' + ${prod.codice} + ')'"></strong>
+            
+            <th:block th:if="${prod.getSkus() != null}">
+                <ul class="tree-list-semplice" th:if="${not prod.getSkus().isEmpty()}">
+                    <li class="tree-item-sku" th:each="sku : ${prod.getSkus()}" th:text="'↳ SKU: ' + ${sku.nome} + ' - Prezzo: ' + ${sku.prezzo} + ' €'"></li>
+                </ul>
+            </th:block>
+            
+            <th:block th:if="${prod.getComponenti() != null}">
+                <ul class="tree-list-composto" th:if="${not prod.getComponenti().isEmpty()}">
+                    <th:block th:replace="~{::stampaAlbero(nodiGerarchia=${prod.getComponenti()})}"></th:block>
+                </ul>
+            </th:block>
+            
+        </li>
+    </th:block>
+
+    <div class="bottom-section">
+        <h3 th:if="${messaggio}" th:text="${messaggio}"></h3>
+        <a th:href="@{/GoToRicercaProdotti}"><button>Ricerca Prodotti</button></a>
+    </div>
+
+</body>
+</html>

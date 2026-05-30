@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Gestione Prodotti</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <h1>Benvenuto nel Configuratore</h1>
+
+    <div th:if="${errore != null}"><p class="error-message" th:text="${errore}"></p></div>
+
+    <div class="container">
+        <h2>Accedi</h2>
+        <form action="CheckLogin" method="POST">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+
+            <button type="submit">Accedi</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <h2>Nuovo Utente?</h2>
+        <form action="CheckRegistrazione" method="POST">
+            <label>Nome</label>
+            <input type="text" name="nome" required>
+
+            <label>Cognome</label>
+            <input type="text" name="cognome" required>
+
+            <label>Username</label>
+            <input type="text" name="username" required>
+
+            <label>Password</label>
+            <input type="password" name="password" required>
+
+            <label>Ruolo</label>
+            <select name="ruolo">
+                <option value="CLIENTE">Cliente</option>
+                <option value="FORNITORE">Fornitore</option>
+            </select>
+
+            <button type="submit">Registrati</button>
+        </form>
+    </div>
+
+</body>
+</html>

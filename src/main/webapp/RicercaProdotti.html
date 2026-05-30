@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Ricerca Prodotti - Area Fornitore</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1 th:text="'Area di Ricerca - ' + ${session.utente.nome}">Ricerca</h1>
+        <div>
+            <a th:href="@{/GoToHomeFornitore}"><button class="search-btn" style="margin-right: 10px;">Home</button></a>
+            <a th:href="@{/GoToHomePage}"><button class="search-btn">Logout</button></a>
+        </div>
+    </div>
+
+    <div th:if="${errore != null}"><p class="error-message" th:text="${errore}"></p></div>
+
+    <div class="search-container">
+        
+        <div class="result-box">
+            <form action="GoToRicercaProdotti" method="GET" class="search-form">
+                <label class="search-label">Cerca: </label>
+                <input type="text" name="keyword" th:value="${keyword}" placeholder="Nome o descrizione..." required class="search-input">
+                <button type="submit" class="search-btn">Cerca</button>
+            </form>
+        </div>
+
+        <div th:if="${keyword != null}">
+            <h3>Risultati per: "<span th:text="${keyword}"></span>"</h3>
+            
+            <div class="result-box result-list">
+                <h4 class="result-title">Prodotti Trovati</h4>
+                <div th:if="${#lists.isEmpty(risultatiProdotti)}"><p>Nessun prodotto trovato.</p></div>
+                
+                <a th:each="p : ${risultatiProdotti}" 
+                   th:href="@{/GoToRicercaProdotti(keyword=${keyword}, dettaglioCodice=${p.codice}, dettaglioTipo=${p.getTipo()})}" 
+                   th:text="${p.nome} + ' (Codice: ' + ${p.codice} + ')'">
+                </a>
+                
+                <h4 class="result-title-spaced">SKU Trovate</h4>
+                <div th:if="${#lists.isEmpty(risultatiSku)}"><p>Nessuna SKU trovata.</p></div>
+                
+                <a th:each="s : ${risultatiSku}" 
+                   th:href="@{/GoToRicercaProdotti(keyword=${keyword}, dettaglioCodice=${s.codice}, dettaglioTipo='SKU')}" 
+                   th:text="${s.nome} + ' (Codice: ' + ${s.codice} + ')'">
+                </a>
+            </div>
+        </div>
+
+        <div class="success-panel panel-sku" th:if="${dettaglioSku != null}">
+            <div class="detail-header">
+                <h3 class="detail-title">Dettaglio SKU</h3>
+                <form action="EliminaOggetto" method="POST" class="delete-form">
+                    <input type="hidden" name="codice" th:value="${dettaglioSku.codice}">
+                    <input type="hidden" name="tipo" value="SKU">
+                    <button type="submit" class="btn-elimina">ELIMINA</button>
+                </form>
+            </div>
+            <ul>
+                <li><strong>Codice:</strong> <span th:text="${dettaglioSku.codice}"></span></li>
+                <li><strong>Nome:</strong> <span th:text="${dettaglioSku.nome}"></span></li>
+                <li><strong>Descrizione:</strong> <span th:text="${dettaglioSku.descrizione}"></span></li>
+                <li><strong>Prezzo:</strong> <span th:text="${dettaglioSku.prezzo} + ' €'"></span></li>
+            </ul>
+        </div>
+
+        <div class="success-panel panel-semplice" th:if="${dettaglioProdSemplice != null}">
+            <div class="detail-header">
+                <h3 class="detail-title">Dettaglio Prodotto Semplice</h3>
+                <form action="EliminaOggetto" method="POST" class="delete-form">
+                    <input type="hidden" name="codice" th:value="${dettaglioProdSemplice.codice}">
+                    <input type="hidden" name="tipo" value="PRODOTTO_SEMPLICE">
+                    <button type="submit" class="btn-elimina">ELIMINA</button>
+                </form>
+            </div>
+            <ul>
+                <li><strong>Codice:</strong> <span th:text="${dettaglioProdSemplice.codice}"></span></li>
+                <li><strong>Nome:</strong> <span th:text="${dettaglioProdSemplice.nome}"></span></li>
+            </ul>
+            <h4>SKU Associate:</h4>
+            <ul class="tree-container">
+                <li class="tree-item-sku" th:each="sku : ${skuAssociate}">
+                    <span th:text="'↳ SKU: ' + ${sku.nome} + ' - Prezzo: ' + ${sku.prezzo} + ' €'"></span>
+                    <a class="btn-rimuovi" th:href="@{/RimuoviAssociazione(idSemplice=${dettaglioProdSemplice.codice}, idSku=${sku.codice})}">RIMUOVI</a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="success-panel panel-composto" th:if="${dettaglioProdComposto != null}">
+            <div class="detail-header">
+                <h3 class="detail-title">Dettaglio Prodotto Composto</h3>
+                <form action="EliminaOggetto" method="POST" class="delete-form">
+                    <input type="hidden" name="codice" th:value="${dettaglioProdComposto.codice}">
+                    <input type="hidden" name="tipo" value="PRODOTTO_COMPOSTO">
+                    <button type="submit" class="btn-elimina">ELIMINA</button>
+                </form>
+            </div>
+            <ul>
+                <li><strong>Codice:</strong> <span th:text="${dettaglioProdComposto.codice}"></span></li>
+                <li><strong>Nome:</strong> <span th:text="${dettaglioProdComposto.nome}"></span></li>
+                <li><strong>Descrizione:</strong> <span th:text="${dettaglioProdComposto.descrizione}"></span></li>
+                <li><strong>Fascia di prezzo:</strong> <span th:text="${dettaglioProdComposto.prezzoMin} + ' €  -  ' + ${dettaglioProdComposto.prezzoMax} + ' €'"></span></li>
+            </ul>
+            <h4>Struttura Gerarchica:</h4>
+            <ul class="tree-container">
+                <th:block th:replace="~{::stampaAlbero(nodiGerarchia=${dettaglioProdComposto.getComponenti()}, idPadre=${dettaglioProdComposto.codice})}"></th:block>
+            </ul>
+        </div>
+        
+    </div>
+
+    <th:block th:fragment="stampaAlbero(nodiGerarchia, idPadre)">
+        <li th:each="prod : ${nodiGerarchia}">
+            
+            <strong class="tree-title" th:text="${prod.nome} + ' (Codice: ' + ${prod.codice} + ')'"></strong>
+            
+            <a class="btn-rimuovi" th:href="@{/RimuoviAssociazione(idPadre=${idPadre}, idFiglio=${prod.codice})}">RIMUOVI</a>
+            
+            <th:block th:if="${prod.getSkus() != null}">
+                <ul class="tree-list-semplice" th:if="${not prod.getSkus().isEmpty()}">
+                    <li class="tree-item-sku" th:each="sku : ${prod.getSkus()}">
+                        <span th:text="'↳ SKU: ' + ${sku.nome} + ' - Prezzo: ' + ${sku.prezzo} + ' €'"></span>
+                        <a class="btn-rimuovi" th:href="@{/RimuoviAssociazione(idSemplice=${prod.codice}, idSku=${sku.codice})}">RIMUOVI</a>
+                    </li>
+                </ul>
+            </th:block>
+            
+            <th:block th:if="${prod.getComponenti() != null}">
+                <ul class="tree-list-composto" th:if="${not prod.getComponenti().isEmpty()}">
+                    <th:block th:replace="~{::stampaAlbero(nodiGerarchia=${prod.getComponenti()}, idPadre=${prod.codice})}"></th:block>
+                </ul>
+            </th:block>
+            
+        </li>
+    </th:block>
+
+</body>
+</html>

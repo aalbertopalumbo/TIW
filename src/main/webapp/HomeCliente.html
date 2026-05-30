@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Home Cliente - Configuratore Prodotti</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1 th:text="'Benvenuto, ' + ${session.utente.nome} + ' ' + ${session.utente.cognome}">Benvenuto Cliente</h1>
+        <div class="header-buttons">
+            <a th:href="@{/GoToMieConfigurazioni}"><button class="btn-success">Le Mie Configurazioni</button></a>
+            <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
+        </div>
+    </div>
+
+    <div class="container main-container">
+        
+        <div th:if="${errore != null}">
+            <p class="error-message" th:text="${errore}"></p>
+        </div>
+
+        <h2>Catalogo Prodotti Base</h2>
+        <p>Seleziona un prodotto dalla lista per iniziare una nuova configurazione.</p>
+
+        <div th:if="${#lists.isEmpty(prodottiPrincipali)}">
+            <p class="empty-message">Nessun prodotto configurabile disponibile al momento. Riprova più tardi.</p>
+        </div>
+
+        <div class="product-list" th:if="${not #lists.isEmpty(prodottiPrincipali)}">
+            <div th:each="p : ${prodottiPrincipali}" class="product-card">
+                <a th:href="@{/GoToSceltaSku(codiceProdotto=${p.codice})}">
+                    <h3 th:text="${p.nome}">Nome Prodotto</h3>
+                    <p class="product-desc" th:text="${p.descrizione}">Descrizione del prodotto</p>
+                    <strong th:text="'Fascia di prezzo stimata: ' + ${p.prezzoMin} + ' € - ' + ${p.prezzoMax} + ' €'">Prezzo</strong>
+                </a>
+            </div>
+        </div>
+
+        <div class="pagination-container" th:if="${hasPrev or hasNext}">
+            <div class="pagination-btn">
+                <a th:if="${hasPrev}" th:href="@{/GoToHomeCliente(pagina=${paginaCorrente - 1})}">
+                    <button>&larr; Precedenti</button>
+                </a>
+            </div>
+            
+            <span class="pagination-text" th:text="'Pagina ' + ${paginaCorrente}">Pagina 1</span>
+            
+            <div class="pagination-btn right">
+                <a th:if="${hasNext}" th:href="@{/GoToHomeCliente(pagina=${paginaCorrente + 1})}">
+                    <button>Successivi &rarr;</button>
+                </a>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
