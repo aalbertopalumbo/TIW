@@ -55,7 +55,7 @@ public class GoToHomeFornitore extends HttpServlet {
 		JakartaServletWebApplication application = JakartaServletWebApplication.buildApplication(getServletContext());
 		WebApplicationTemplateResolver templateResolver = new WebApplicationTemplateResolver(application);
 		templateResolver.setTemplateMode(TemplateMode.HTML);
-		templateResolver.setPrefix("/"); // Cerca i file partendo dalla cartella webapp
+		templateResolver.setPrefix("/"); 
 		templateResolver.setSuffix(".html");
 		
 		this.templateEngine = new TemplateEngine();

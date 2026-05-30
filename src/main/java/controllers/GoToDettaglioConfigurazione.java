@@ -11,10 +11,9 @@ import org.thymeleaf.templateresolver.WebApplicationTemplateResolver;
 import org.thymeleaf.web.IWebExchange;
 import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 
-import beans.ProdottoComposto;
+import beans.Configurazione;
 import beans.Utente;
-import dao.ProdottoDAO;
-import dao.SkuDAO;
+import dao.ConfigurazioneDAO;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.UnavailableException;
@@ -25,8 +24,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import utils.ConnectionHandler;
 
-@WebServlet("/GoToSceltaSku")
-public class GoToSceltaSku extends HttpServlet {
+@WebServlet("/GoToDettaglioConfigurazione")
+public class GoToDettaglioConfigurazione extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 	private Connection connection = null;
 	private TemplateEngine templateEngine;
@@ -51,7 +50,7 @@ public class GoToSceltaSku extends HttpServlet {
 		JakartaServletWebApplication application = JakartaServletWebApplication.buildApplication(getServletContext());
 		WebApplicationTemplateResolver templateResolver = new WebApplicationTemplateResolver(application);
 		templateResolver.setTemplateMode(TemplateMode.HTML);
-		templateResolver.setPrefix("/");
+		templateResolver.setPrefix("/"); 
 		templateResolver.setSuffix(".html");
 		
 		this.templateEngine = new TemplateEngine();
@@ -59,57 +58,52 @@ public class GoToSceltaSku extends HttpServlet {
 	}
 
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-		// controllo accessi per il cliente
+		
+		// controllo cliente
 		HttpSession session = request.getSession(false);
-		if (session == null || session.getAttribute("utente") == null) {
+		if (session == null || session.getAttribute("utente") == null || ((Utente) session.getAttribute("utente")).getRuolo() != Utente.RuoloUtente.CLIENTE) {
 			response.sendRedirect(getServletContext().getContextPath() + "/HomePage.html");
 			return;
 		}
 
-		Utente utente = (Utente) session.getAttribute("utente");
-		if (utente.getRuolo() != Utente.RuoloUtente.CLIENTE) {
-			response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Accesso negato");
-			return;
-		}
-
-		String codiceParam = request.getParameter("codiceProdotto");
-		if (codiceParam == null || codiceParam.isEmpty()) {
+		String idParam = request.getParameter("idConfig");
+		if (idParam == null || idParam.isEmpty()) {
 			response.sendRedirect(getServletContext().getContextPath() + "/GoToHomeCliente");
 			return;
 		}
 
 		try {
-			// prendiamo il prodotto passato da input (quello cliccato)
-			int codiceRadice = Integer.parseInt(codiceParam);
-			ProdottoDAO prodottoDao = new ProdottoDAO(connection);
-			SkuDAO skuDao = new SkuDAO(connection);
-
-			// ne troviamo i dati
-			ProdottoComposto radice = prodottoDao.findProdottoCompostoById(codiceRadice);
+			int idConfig = Integer.parseInt(idParam);
+			ConfigurazioneDAO dao = new ConfigurazioneDAO(connection);
 			
-			if (radice != null) {
-				// carichiamo ricorsivamente tutto l'albero di sottoprodotti e sku
-				radice.setComponenti(prodottoDao.trovaSottoprodottiRicorsivi(codiceRadice, skuDao));
+			// Andiamo a prendere la configurazione intera
+			Configurazione config = dao.getConfigurazioneCompleta(idConfig);
+			
+			if (config == null) {
+				response.sendError(HttpServletResponse.SC_NOT_FOUND, "Configurazione non trovata");
+				return;
+			}
+			
+			Utente utenteConnesso = (Utente) session.getAttribute("utente");
+			
+			// impediamo di cambiare schermata
+			if (!config.getCliente().getUsername().equals(utenteConnesso.getUsername())) {
+				response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Non sei autorizzato a visualizzare questa configurazione.");
+				return;
 			}
 
 			final IWebExchange webExchange = JakartaServletWebApplication.buildApplication(getServletContext()).buildExchange(request, response);
 			final WebContext ctx = new WebContext(webExchange, request.getLocale());
 			
-			// passiamo il prodotto alla pagina per visualizzare tutti i vari sottocosi
-			ctx.setVariable("prodottoRadice", radice);
-			
-			String errore = (String) request.getAttribute("errore");
-			if (errore != null) ctx.setVariable("errore", errore);
+			// passiamo l'oggetto configurazione
+			ctx.setVariable("configurazione", config);
+			templateEngine.process("/DettaglioConfigurazione.html", ctx, response.getWriter());
 
-			templateEngine.process("/SceltaSku.html", ctx, response.getWriter());
-
-		} catch (Exception e) {
+		} catch (NumberFormatException | SQLException e) {
 			e.printStackTrace();
-			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Errore nel caricamento della configurazione");
+			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Errore nel caricamento del dettaglio");
 		}
 	}
 	
-	public void destroy() {
-		try { ConnectionHandler.closeConnection(connection); } catch (Exception e) {}
-	}
+	public void destroy() { try { ConnectionHandler.closeConnection(connection); } catch (Exception e) {} }
 }
