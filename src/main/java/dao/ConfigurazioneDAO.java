@@ -28,7 +28,7 @@ public class ConfigurazioneDAO {
 	public int salvaConfigurazione(String nomeConfig, String username, int codiceRadice, double prezzoTotale, Map<Integer, Integer> scelteSku) throws SQLException {
 		int idConfigurazione = -1;
 		
-		String insertConfig = "INSERT INTO Configurazione (nome, username_cliente, codice_prodotto_radice, data_creazione, prezzo_totale) VALUES (?, ?, ?, CURDATE(), ?)";
+		String insertConfig = "INSERT INTO Configurazione (nome, username_cliente, cod_prodotto_radice, data_creazione, prezzo_totale) VALUES (?, ?, ?, CURDATE(), ?)";
 		String insertDettaglio = "INSERT INTO Dettaglio (id_config, cod_prod_s, cod_sku) VALUES (?, ?, ?)";
 
 		try {
@@ -84,8 +84,8 @@ public class ConfigurazioneDAO {
 		Configurazione config = null;
 		
 		// estraiamo la configurazione
-		String qConfig = "SELECT c.id, c.nome, c.username_cliente, c.codice_prodotto_radice, c.data_creazione, c.prezzo_totale, p.nome AS nome_padre " +
-		                 "FROM Configurazione c JOIN Prodotto p ON c.codice_prodotto_radice = p.codice " +
+		String qConfig = "SELECT c.id, c.nome, c.username_cliente, c.cod_prodotto_radice, c.data_creazione, c.prezzo_totale, p.nome AS nome_padre " +
+		                 "FROM Configurazione c JOIN Prodotto p ON c.cod_prodotto_radice = p.codice " +
 		                 "WHERE c.id = ?";
 		
 		try (PreparedStatement ps = con.prepareStatement(qConfig)) {
@@ -105,7 +105,7 @@ public class ConfigurazioneDAO {
 					
 					// mettiamo utente padre
 					ProdottoComposto radice = new ProdottoComposto();
-					radice.setCodice(rs.getInt("codice_prodotto_radice"));
+					radice.setCodice(rs.getInt("cod_prodotto_radice"));
 					radice.setNome(rs.getString("nome_padre"));
 					config.setProdotto(radice);
 				}
@@ -155,5 +155,38 @@ public class ConfigurazioneDAO {
 	}
 	
 	
-	
+	public List<Configurazione> getConfigurazioniByUtente(String username) throws SQLException {
+		List<Configurazione> lista = new ArrayList<>();
+		
+		// prendiamo tutte le configurazioni di un utente
+		String query = "SELECT c.id, c.nome, c.data_creazione, c.data_ultima_modifica, c.prezzo_totale, p.nome AS nome_padre " +
+		               "FROM Configurazione c " +
+		               "JOIN Prodotto p ON c.cod_prodotto_radice = p.codice " +
+		               "WHERE c.username_cliente = ? " +
+		               "ORDER BY c.data_creazione DESC";
+		
+		try (PreparedStatement ps = con.prepareStatement(query)) {
+			ps.setString(1, username);
+			try (ResultSet rs = ps.executeQuery()) {
+				while (rs.next()) {
+					Configurazione config = new Configurazione();
+					config.setId(rs.getInt("id"));
+					config.setNome(rs.getString("nome"));
+					config.setDataCreazione(rs.getDate("data_creazione"));
+					config.setDataUltimaModifica(rs.getDate("data_ultima_modifica"));
+					config.setPrezzoTotale(rs.getDouble("prezzo_totale"));
+					
+					ProdottoComposto radice = new ProdottoComposto();
+					radice.setNome(rs.getString("nome_padre"));
+					config.setProdotto(radice);
+					
+					lista.add(config);
+				}
+			}
+		}
+		return lista;
+	}
 }
+	
+	
+	
