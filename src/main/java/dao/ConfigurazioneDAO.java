@@ -186,6 +186,74 @@ public class ConfigurazioneDAO {
 		}
 		return lista;
 	}
+	
+	
+	public void eliminaConfigurazione(int idConfig) throws SQLException {
+	    String query = "DELETE FROM Configurazione WHERE id = ?";
+	    try (PreparedStatement ps = con.prepareStatement(query)) {
+	        ps.setInt(1, idConfig);
+	        ps.executeUpdate();
+	    }
+	}
+
+	public int clonaConfigurazione(int idConfig) throws SQLException {
+	    int nuovoId = -1;
+
+	    String qConfig = "SELECT nome, username_cliente, cod_prodotto_radice, prezzo_totale FROM Configurazione WHERE id = ?";
+	    String insConfig = "INSERT INTO Configurazione (nome, username_cliente, cod_prodotto_radice, data_creazione, prezzo_totale) VALUES (?, ?, ?, CURDATE(), ?)";
+	    String qDettagli = "SELECT cod_prod_s, cod_sku FROM Dettaglio WHERE id_config = ?";
+	    String insDettaglio = "INSERT INTO Dettaglio (id_config, cod_prod_s, cod_sku) VALUES (?, ?, ?)";
+
+	    try {
+	        con.setAutoCommit(false);
+
+	        try (PreparedStatement psConfig = con.prepareStatement(qConfig)) {
+	            psConfig.setInt(1, idConfig);
+	            try (ResultSet rs = psConfig.executeQuery()) {
+	                if (!rs.next()) throw new SQLException("Configurazione non trovata");
+
+	                try (PreparedStatement psIns = con.prepareStatement(insConfig, Statement.RETURN_GENERATED_KEYS)) {
+	                    psIns.setString(1, rs.getString("nome") + " (copia)");
+	                    psIns.setString(2, rs.getString("username_cliente"));
+	                    psIns.setInt(3, rs.getInt("cod_prodotto_radice"));
+	                    psIns.setDouble(4, rs.getDouble("prezzo_totale"));
+	                    psIns.executeUpdate();
+
+	                    try (ResultSet keys = psIns.getGeneratedKeys()) {
+	                        if (keys.next()) nuovoId = keys.getInt(1);
+	                        else throw new SQLException("Clonazione fallita");
+	                    }
+	                }
+	            }
+	        }
+
+	        try (PreparedStatement psDett = con.prepareStatement(qDettagli)) {
+	            psDett.setInt(1, idConfig);
+	            try (ResultSet rs = psDett.executeQuery()) {
+	                try (PreparedStatement psInsDett = con.prepareStatement(insDettaglio)) {
+	                    while (rs.next()) {
+	                        psInsDett.setInt(1, nuovoId);
+	                        psInsDett.setInt(2, rs.getInt("cod_prod_s"));
+	                        psInsDett.setInt(3, rs.getInt("cod_sku"));
+	                        psInsDett.addBatch();
+	                    }
+	                    psInsDett.executeBatch();
+	                }
+	            }
+	        }
+
+	        con.commit();
+	    } catch (SQLException e) {
+	        con.rollback();
+	        throw e;
+	    } finally {
+	        con.setAutoCommit(true);
+	    }
+
+	    return nuovoId;
+	}
+	
+	
 }
 	
 	

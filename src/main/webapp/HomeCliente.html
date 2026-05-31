@@ -10,7 +10,7 @@
     <div class="header-bar">
         <h1 th:text="'Benvenuto, ' + ${session.utente.nome} + ' ' + ${session.utente.cognome}">Benvenuto Cliente</h1>
         <div class="header-buttons">
-            <a th:href="@{/GoToMieConfigurazioni}"><button class="btn-success">Le Mie Configurazioni</button></a>
+            <a th:href="@{/GoToLeMieConfigurazioni}"><button class="btn-success">Le Mie Configurazioni</button></a>
             <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
         </div>
     </div>
