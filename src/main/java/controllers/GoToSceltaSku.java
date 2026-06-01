@@ -11,8 +11,10 @@ import org.thymeleaf.templateresolver.WebApplicationTemplateResolver;
 import org.thymeleaf.web.IWebExchange;
 import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 
+import beans.Configurazione;
 import beans.ProdottoComposto;
 import beans.Utente;
+import dao.ConfigurazioneDAO;
 import dao.ProdottoDAO;
 import dao.SkuDAO;
 import jakarta.servlet.ServletContext;
@@ -59,54 +61,66 @@ public class GoToSceltaSku extends HttpServlet {
 	}
 
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-		// controllo accessi per il cliente
-		HttpSession session = request.getSession(false);
-		if (session == null || session.getAttribute("utente") == null) {
-			response.sendRedirect(getServletContext().getContextPath() + "/HomePage.html");
-			return;
-		}
+	    HttpSession session = request.getSession(false);
+	    if (session == null || session.getAttribute("utente") == null) {
+	        response.sendRedirect(getServletContext().getContextPath() + "/HomePage.html");
+	        return;
+	    }
 
-		Utente utente = (Utente) session.getAttribute("utente");
-		if (utente.getRuolo() != Utente.RuoloUtente.CLIENTE) {
-			response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Accesso negato");
-			return;
-		}
+	    Utente utente = (Utente) session.getAttribute("utente");
+	    if (utente.getRuolo() != Utente.RuoloUtente.CLIENTE) {
+	        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Accesso negato");
+	        return;
+	    }
 
-		String codiceParam = request.getParameter("codiceProdotto");
-		if (codiceParam == null || codiceParam.isEmpty()) {
-			response.sendRedirect(getServletContext().getContextPath() + "/GoToHomeCliente");
-			return;
-		}
+	    String codiceParam = request.getParameter("codiceProdotto");
+	    if (codiceParam == null || codiceParam.isEmpty()) {
+	        response.sendRedirect(getServletContext().getContextPath() + "/GoToHomeCliente");
+	        return;
+	    }
 
-		try {
-			// prendiamo il prodotto passato da input (quello cliccato)
-			int codiceRadice = Integer.parseInt(codiceParam);
-			ProdottoDAO prodottoDao = new ProdottoDAO(connection);
-			SkuDAO skuDao = new SkuDAO(connection);
+	    try {
+	        int codiceRadice = Integer.parseInt(codiceParam);
+	        ProdottoDAO prodottoDao = new ProdottoDAO(connection);
+	        SkuDAO skuDao = new SkuDAO(connection);
 
-			// ne troviamo i dati
-			ProdottoComposto radice = prodottoDao.findProdottoCompostoById(codiceRadice);
-			
-			if (radice != null) {
-				// carichiamo ricorsivamente tutto l'albero di sottoprodotti e sku
-				radice.setComponenti(prodottoDao.trovaSottoprodottiRicorsivi(codiceRadice, skuDao));
-			}
+	        ProdottoComposto radice = prodottoDao.findProdottoCompostoById(codiceRadice);
+	        if (radice != null) {
+	        		// andiamo a prendere ricorsivamente tutti i sottoprodotti e sku
+	            radice.setComponenti(prodottoDao.trovaSottoprodottiRicorsivi(codiceRadice, skuDao));
+	        }
 
-			final IWebExchange webExchange = JakartaServletWebApplication.buildApplication(getServletContext()).buildExchange(request, response);
-			final WebContext ctx = new WebContext(webExchange, request.getLocale());
-			
-			// passiamo il prodotto alla pagina per visualizzare tutti i vari sottocosi
-			ctx.setVariable("prodottoRadice", radice);
-			
-			String errore = (String) request.getAttribute("errore");
-			if (errore != null) ctx.setVariable("errore", errore);
+	        final IWebExchange webExchange = JakartaServletWebApplication.buildApplication(getServletContext()).buildExchange(request, response);
+	        final WebContext ctx = new WebContext(webExchange, request.getLocale());
+	        ctx.setVariable("prodottoRadice", radice);
 
-			templateEngine.process("/SceltaSku.html", ctx, response.getWriter());
+	        // se stiamo modificando una config esistente, carichiamo le scelte precedenti
+	        String idConfigParam = request.getParameter("idConfig");
+	        if (idConfigParam != null && !idConfigParam.isEmpty()) {
+	            int idConfig = Integer.parseInt(idConfigParam);
+	            ConfigurazioneDAO configDao = new ConfigurazioneDAO(connection);
+	            
+	            // verifica che la configurazione appartenga all'utente connesso
+	            Configurazione config = configDao.getConfigurazioneCompleta(idConfig);
+	            if (config == null || !config.getCliente().getUsername().equals(utente.getUsername())) {
+	                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Non autorizzato");
+	                return;
+	            }
+	            
+	            ctx.setVariable("idConfigInModifica", idConfig);
+	            ctx.setVariable("sceltePrec", configDao.getScelteByConfigurazione(idConfig));
+	            ctx.setVariable("nomeConfigEsistente", config.getNome());
+	        }
 
-		} catch (Exception e) {
-			e.printStackTrace();
-			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Errore nel caricamento della configurazione");
-		}
+	        String errore = (String) request.getAttribute("errore");
+	        if (errore != null) ctx.setVariable("errore", errore);
+
+	        templateEngine.process("/SceltaSku.html", ctx, response.getWriter());
+
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Errore nel caricamento");
+	    }
 	}
 	
 	public void destroy() {

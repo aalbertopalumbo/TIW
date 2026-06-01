@@ -383,6 +383,14 @@ public class ProdottoDAO {
 			}
 		}
 		
+		// se è un prodotto semplice elimina le config in cui è presente
+		String deleteConfig = "DELETE FROM Configurazione WHERE id IN " +
+							 "(SELECT id_config FROM Dettaglio WHERE cod_prod_s = ?)";
+		try (PreparedStatement ps = con.prepareStatement(deleteConfig)) {
+		ps.setInt(1, codice);
+		ps.executeUpdate();
+		}
+		
 		// elimina l'oggetto singolo e poi il cascade in db fa il resto
 		String delete = "DELETE FROM Prodotto WHERE codice = ?";
 		try (PreparedStatement ps = con.prepareStatement(delete)) { 

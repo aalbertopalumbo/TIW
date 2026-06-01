@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -159,11 +160,11 @@ public class ConfigurazioneDAO {
 		List<Configurazione> lista = new ArrayList<>();
 		
 		// prendiamo tutte le configurazioni di un utente
-		String query = "SELECT c.id, c.nome, c.data_creazione, c.data_ultima_modifica, c.prezzo_totale, p.nome AS nome_padre " +
-		               "FROM Configurazione c " +
-		               "JOIN Prodotto p ON c.cod_prodotto_radice = p.codice " +
-		               "WHERE c.username_cliente = ? " +
-		               "ORDER BY c.data_creazione DESC";
+		String query = "SELECT c.id, c.nome, c.data_creazione, c.data_ultima_modifica, c.prezzo_totale, c.cod_prodotto_radice, p.nome AS nome_padre " +
+	               "FROM Configurazione c " +
+	               "JOIN Prodotto p ON c.cod_prodotto_radice = p.codice " +
+	               "WHERE c.username_cliente = ? " +
+	               "ORDER BY c.data_creazione DESC";
 		
 		try (PreparedStatement ps = con.prepareStatement(query)) {
 			ps.setString(1, username);
@@ -177,6 +178,7 @@ public class ConfigurazioneDAO {
 					config.setPrezzoTotale(rs.getDouble("prezzo_totale"));
 					
 					ProdottoComposto radice = new ProdottoComposto();
+					radice.setCodice(rs.getInt("cod_prodotto_radice"));
 					radice.setNome(rs.getString("nome_padre"));
 					config.setProdotto(radice);
 					
@@ -251,6 +253,60 @@ public class ConfigurazioneDAO {
 	    }
 
 	    return nuovoId;
+	}
+	
+	
+	public Map<Integer, Integer> getScelteByConfigurazione(int idConfig) throws SQLException {
+	    Map<Integer, Integer> scelte = new HashMap<>();
+	    String query = "SELECT cod_prod_s, cod_sku FROM Dettaglio WHERE id_config = ?";
+	    try (PreparedStatement ps = con.prepareStatement(query)) {
+	        ps.setInt(1, idConfig);
+	        try (ResultSet rs = ps.executeQuery()) {
+	            while (rs.next()) {
+	                scelte.put(rs.getInt("cod_prod_s"), rs.getInt("cod_sku"));
+	            }
+	        }
+	    }
+	    return scelte;
+	}
+
+	public void aggiornaConfigurazione(int idConfig, String nomeConfig, double prezzoTotale, Map<Integer, Integer> scelteSku) throws SQLException {
+		String updConfig = "UPDATE Configurazione SET nome = ?, data_ultima_modifica = CURDATE(), prezzo_totale = ? WHERE id = ?";
+	    String delDettagli = "DELETE FROM Dettaglio WHERE id_config = ?";
+	    String insDettaglio = "INSERT INTO Dettaglio (id_config, cod_prod_s, cod_sku) VALUES (?, ?, ?)";
+
+	    try {
+	        con.setAutoCommit(false);
+
+	        try (PreparedStatement ps = con.prepareStatement(updConfig)) {
+	            ps.setString(1, nomeConfig);
+	            ps.setDouble(2, prezzoTotale);
+	            ps.setInt(3, idConfig);
+	            ps.executeUpdate();
+	        }
+
+	        try (PreparedStatement ps = con.prepareStatement(delDettagli)) {
+	            ps.setInt(1, idConfig);
+	            ps.executeUpdate();
+	        }
+
+	        try (PreparedStatement ps = con.prepareStatement(insDettaglio)) {
+	            for (Map.Entry<Integer, Integer> entry : scelteSku.entrySet()) {
+	                ps.setInt(1, idConfig);
+	                ps.setInt(2, entry.getKey());
+	                ps.setInt(3, entry.getValue());
+	                ps.addBatch();
+	            }
+	            ps.executeBatch();
+	        }
+
+	        con.commit();
+	    } catch (SQLException e) {
+	        con.rollback();
+	        throw e;
+	    } finally {
+	        con.setAutoCommit(true);
+	    }
 	}
 	
 	

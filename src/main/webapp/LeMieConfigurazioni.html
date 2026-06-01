@@ -44,6 +44,10 @@
                     <a th:href="@{/GoToDettaglioConfigurazione(idConfig=${config.id})}">
                         <button style="width: auto; padding: 8px 14px; margin: 0; background-color: var(--primary-color);">Dettaglio</button>
                     </a>
+                    
+                    <a th:href="@{/GoToSceltaSku(codiceProdotto=${config.prodotto.codice}, idConfig=${config.id})}">
+    						<button style="width: auto; padding: 8px 14px; margin: 0; background-color: #17a2b8;">Modifica</button>
+					</a>
 
                     <form th:action="@{/ClonaConfigurazione}" method="POST" style="margin: 0;">
                         <input type="hidden" name="idConfig" th:value="${config.id}">

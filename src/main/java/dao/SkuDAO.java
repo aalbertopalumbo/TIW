@@ -157,6 +157,16 @@ public class SkuDAO {
 		}
 		
 		// se no elimina
+		
+		// elimina le configurazioni che contengono questa SKU
+		String deleteConfig = "DELETE FROM Configurazione WHERE id IN " +
+		                      "(SELECT id_config FROM Dettaglio WHERE cod_sku = ?)";
+		try (PreparedStatement ps = con.prepareStatement(deleteConfig)) {
+		    ps.setInt(1, codice);
+		    ps.executeUpdate();
+		}
+		
+		
 		String deleteQuery = "DELETE FROM Sku WHERE codice = ?";
 		try (PreparedStatement ps = con.prepareStatement(deleteQuery)) {
 			ps.setInt(1, codice);

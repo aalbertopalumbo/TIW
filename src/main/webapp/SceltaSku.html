@@ -10,7 +10,8 @@
     <div class="header-bar">
         <h1>Configurazione: <span th:text="${prodottoRadice.nome}">Prodotto</span></h1>
         <div class="header-buttons">
-            <a th:href="@{/GoToHomeCliente}"><button class="btn-danger">Annulla e Torna Indietro</button></a>
+            <a th:href="@{/GoToHomeCliente}"><button class="btn-danger">Home</button></a>
+            <a th:href="@{/GoToLeMieConfigurazioni}"><button class="btn-danger">Le Mie Configurazioni</button></a>
             <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
         </div>
     </div>
@@ -28,26 +29,32 @@
         </div>
 
         <div class="column" style="grid-column: 1 / -1;">
-            <h3>Seleziona i componenti</h3>
+            <h3 th:text="${idConfigInModifica != null} ? 'Modifica la tua configurazione' : 'Seleziona i componenti'"></h3>
             
             <form th:action="@{/SalvaConfigurazione}" action="SalvaConfigurazione" method="POST">
                 
                 <div class="form-group config-name-box">
                     <label for="nomeConfig">Dai un nome alla tua configurazione:</label>
-                    <input type="text" id="nomeConfig" name="nomeConfigurazione" placeholder="Es: PC da Gaming..." required>
+                    <input type="text" id="nomeConfig" name="nomeConfigurazione" th:value="${nomeConfigEsistente != null} ? ${nomeConfigEsistente} : ''" placeholder="Es: PC da Gaming..." required>
                     <input type="hidden" name="codiceRadice" th:value="${prodottoRadice.codice}">
+                    <input type="hidden" th:if="${idConfigInModifica != null}" name="idConfigInModifica" th:value="${idConfigInModifica}">
                 </div>
 
                 <ul class="tree-container">
                     <th:block th:replace="~{::stampaAlberoConfig(nodiGerarchia=${prodottoRadice.getComponenti()})}"></th:block>
                 </ul>
 
-                <button type="submit" class="btn-success btn-large">SALVA CONFIGURAZIONE</button>
+                <button type="submit" class="btn-success btn-large"
+                        th:text="${idConfigInModifica != null} ? 'SALVA MODIFICHE' : 'SALVA CONFIGURAZIONE'">
+                    SALVA CONFIGURAZIONE
+                </button>
                 
             </form>
         </div>
 
     </div>
+    
+     IN TEORIA SCELTA SKU NON DOVREBBE MOSTRARE TUTTO, MA FAR CLICCARE PER APRIRE A LIVELLI
 
     <th:block th:fragment="stampaAlberoConfig(nodiGerarchia)">
         <li th:each="prod : ${nodiGerarchia}">
@@ -58,10 +65,14 @@
                 <ul class="tree-list-semplice" th:if="${not prod.getSkus().isEmpty()}">
                     <li>
                         <select class="select-sku" th:name="'sku_' + ${prod.codice}" required>
-                            <option value="" disabled selected>-- Scegli una SKU --</option>
-                            <option th:each="sku : ${prod.getSkus()}" 
-                                    th:value="${sku.codice}" 
-                                    th:text="${sku.nome} + ' (' + ${sku.prezzo} + ' €)'">
+                            <option value="" disabled
+                                    th:selected="${sceltePrec == null or sceltePrec[prod.codice] == null}">
+                                -- Scegli una SKU --
+                            </option>
+                            <option th:each="sku : ${prod.getSkus()}"
+                                    th:value="${sku.codice}"
+                                    th:text="${sku.nome} + ' (' + ${sku.prezzo} + ' €)'"
+                                    th:selected="${sceltePrec != null and sceltePrec[prod.codice] == sku.codice}">
                             </option>
                         </select>
                     </li>

@@ -92,11 +92,19 @@ public class SalvaConfigurazione extends HttpServlet {
 			// se tutto ok salviamo
 			ConfigurazioneDAO configDao = new ConfigurazioneDAO(connection);
 			Utente utente = (Utente) session.getAttribute("utente");
-			
-			int newConfigId = configDao.salvaConfigurazione(nomeConfig, utente.getUsername(), codiceRadice, prezzoTotale[0], scelteEffettuate);
 
-			// mandiamo in dettaglio config
-			response.sendRedirect(getServletContext().getContextPath() + "/GoToDettaglioConfigurazione?idConfig=" + newConfigId);
+			String idConfigModificaStr = request.getParameter("idConfigInModifica");
+
+			if (idConfigModificaStr != null && !idConfigModificaStr.isEmpty()) {
+			    // modifica configurazione esistente
+			    int idConfigModifica = Integer.parseInt(idConfigModificaStr);
+			    configDao.aggiornaConfigurazione(idConfigModifica, nomeConfig, prezzoTotale[0], scelteEffettuate);
+			    response.sendRedirect(getServletContext().getContextPath() + "/GoToDettaglioConfigurazione?idConfig=" + idConfigModifica);
+			} else {
+			    // nuova configurazione
+			    int newConfigId = configDao.salvaConfigurazione(nomeConfig, utente.getUsername(), codiceRadice, prezzoTotale[0], scelteEffettuate);
+			    response.sendRedirect(getServletContext().getContextPath() + "/GoToDettaglioConfigurazione?idConfig=" + newConfigId);
+			}
 
 		} catch (NumberFormatException | SQLException e) {
 			e.printStackTrace();
