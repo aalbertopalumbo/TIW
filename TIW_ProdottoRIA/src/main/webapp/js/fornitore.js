@@ -38,6 +38,7 @@
 		this.skusCache = [];
 		this.prodottiCache = [];
 		this.nodiDaEliminare = [];
+		this.relazioniDaEliminare = [];
 
         this.show = function() {
 			this.container.style.display = "flex"; 
@@ -353,6 +354,11 @@
                 btnRemoveRel.textContent = "-";
                 btnRemoveRel.style.marginLeft = "5px";
                 btnRemoveRel.onclick = () => {
+					var nodoDaRimuovere = nodoPadre.figli[indiceNelPadre];
+                    // Se non è nuovo, diciamo al DB di spezzare il legame!
+                    if (nodoDaRimuovere.isNuovo === false) {
+                        this.relazioniDaEliminare.push({ tipoRel: "COMPOSIZIONE", padre: nodoPadre.codice, figlio: nodoDaRimuovere.codice });
+                    }
                     nodoPadre.figli.splice(indiceNelPadre, 1); // rimuove dalla memoria
                     this.disegnaAlberoVisivo(); // ridisegna 
                 };
@@ -407,6 +413,10 @@
                 };
 
                 // Disegna SKU esistenti
+				li.querySelector("button").onclick = () => { 
+                    this.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: codiceSku });
+                    tentaEliminazioneSku(nodo.skus, idx); 
+                };
                 if (nodo.skus) {
                     nodo.skus.forEach((codiceSku, idx) => {
                         let skuDati = this.skusCache.find(x => x.codice == codiceSku);
@@ -601,6 +611,7 @@
             var formData = new FormData();
             formData.append("alberoJSON", JSON.stringify(this.alberoCorrente));
             formData.append("daEliminareJSON", JSON.stringify(this.nodiDaEliminare));
+			formData.append("relazioniDaEliminareJSON", JSON.stringify(this.relazioniDaEliminare)); 
 
             makeCall("POST", "SaveAlberoComposto", formData, (req) => {
                 if (req.readyState === XMLHttpRequest.DONE) {
