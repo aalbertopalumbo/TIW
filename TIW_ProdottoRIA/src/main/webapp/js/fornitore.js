@@ -2,6 +2,68 @@
 
     var orchestrator;
     var utenteLoggato;
+	
+	
+	function GestoreCatalogo(containerId, formId, tableId, bodyRisultatiId, alertId) {
+        this.container = document.getElementById(containerId);
+        this.form = document.getElementById(formId);
+        this.table = document.getElementById(tableId);
+        this.bodyRisultati = document.getElementById(bodyRisultatiId);
+        this.alertContainer = document.getElementById(alertId);
+        this.alberoArea = document.getElementById("id_alberoRicercaArea");
+
+        this.show = function() {
+            this.container.style.display = "block";
+            this.table.style.display = "none";
+            this.alberoArea.style.display = "none";
+            this.bodyRisultati.innerHTML = "";
+            this.form.reset();
+        };
+
+        this.hide = function() {
+            this.container.style.display = "none";
+            this.alertContainer.textContent = "";
+        };
+
+        // Click sul cerca
+        this.form.querySelector("input[type='button']").addEventListener('click', () => {
+            if (this.form.checkValidity()) {
+                let keyword = this.form.keyword.value;
+                
+                makeCall("GET", "GetRicercaProdotti?keyword=" + encodeURIComponent(keyword), null, (req) => {
+                    if (req.readyState === XMLHttpRequest.DONE) {
+                        if (req.status === 200) {
+                            var risultati = JSON.parse(req.responseText);
+                            this.bodyRisultati.innerHTML = "";
+                            this.alberoArea.style.display = "none"; // nasconde un albero aperto prima
+                            
+                            if (risultati.length === 0) {
+                                this.bodyRisultati.innerHTML = "<tr><td colspan='4' style='text-align:center;'>Nessun risultato trovato.</td></tr>";
+                            } else {
+                                risultati.forEach(r => {
+                                    let tr = document.createElement("tr");
+                                    tr.innerHTML = `
+                                        <td style="border: 1px solid #ddd; padding: 8px;">${r.codice}</td>
+                                        <td style="border: 1px solid #ddd; padding: 8px;">[${r.tipo}]</td>
+                                        <td style="border: 1px solid #ddd; padding: 8px;">${r.nome}</td>
+                                        <td style="border: 1px solid #ddd; padding: 8px; text-align:center;">
+                                            <button type="button" class="btn-vedi" data-codice="${r.codice}" data-tipo="${r.tipo}">Vedi Dettaglio</button>
+                                        </td>`;
+                                    this.bodyRisultati.appendChild(tr);
+                                });
+
+                                // QUI PIÙ AVANTI AGGIUNGEREMO L'EVENTO DI CLICK SU "VEDI DETTAGLIO"
+                            }
+                            this.table.style.display = "table"; // mostra la tabella
+                        } else {
+                            this.alertContainer.textContent = "Errore durante la ricerca.";
+                            this.alertContainer.style.color = "red";
+                        }
+                    }
+                });
+            } else { this.form.reportValidity(); }
+        });
+    }
 
 
 	// catalogo prodotti
@@ -89,6 +151,9 @@
 
                             // attiviamo l'inline editing
                             attivaInlineEditing(skuCreata.codice);
+							
+							form.reset();
+							self.loadSkus();
 
                         } else {
                             self.alertContainer.textContent = req.responseText;
@@ -158,7 +223,8 @@
                                     // ok
                                     nuovoSpan.textContent = valoreNuovo;
                                     nuovoSpan.style.color = "blue";
-                                    setTimeout(() => nuovoSpan.style.color = "", 1000);
+                                    setTimeout(() => nuovoSpan.style.color = "", 3000);
+								    self.loadSkus();
                                 } else {
                                     // rollback
                                     nuovoSpan.textContent = valoreVecchio;
@@ -263,6 +329,9 @@
 	
 	                        // ricarichiamo le SKU nella tendina
 	                        self.loadSkus(); 
+							
+							form.reset();
+							self.loadProdottiDisponibili();
 	                    } else {
 	                        self.alertContainer.textContent = req.responseText;
 	                        self.alertContainer.style.color = "red";
@@ -333,9 +402,63 @@
             nodoDiv.style.padding = "5px 10px";
             nodoDiv.style.marginTop = "5px";
 
-            var rigaTop = document.createElement("div");
-            rigaTop.innerHTML = `<strong>[${nodo.tipo}] ${nodo.codice}</strong> - <span class="editableComposto">${nodo.nome}</span>`;
+			var rigaTop = document.createElement("div");
+            rigaTop.style.marginBottom = "5px";
             nodoDiv.appendChild(rigaTop);
+
+            var strongCodice = document.createElement("strong");
+            strongCodice.textContent = `[${nodo.tipo}] ${nodo.codice} - `;
+            rigaTop.appendChild(strongCodice);
+
+            var self = this;
+
+            // FUNZIONE MAGICA: Crea un testo blu cliccabile che diventa un input
+            const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
+                let span = document.createElement("span");
+                span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
+                span.style.color = "#2196F3"; // Colore blu per indicare che è cliccabile
+                span.style.cursor = "pointer";
+                span.style.fontWeight = "bold";
+
+                span.onclick = function() {
+                    if (this.querySelector('input')) return; // Evita doppi click
+                    var vecchioValore = oggetto[proprietà];
+                    
+                    this.textContent = '';
+                    var input = document.createElement('input');
+                    input.type = tipoInput;
+                    input.value = vecchioValore;
+                    if (tipoInput === 'number') input.style.width = "70px"; 
+                    
+                    this.appendChild(input);
+                    input.focus();
+
+                    // Quando sposti il mouse fuori (mouseleave), salva nell'oggetto Javascript locale
+                    input.addEventListener('mouseleave', () => {
+                        var nuovoValore = input.value.trim();
+                        if (nuovoValore === "" || (tipoInput === 'number' && parseFloat(nuovoValore) < 0)) {
+                            oggetto[proprietà] = vecchioValore; // Valore non valido, annulla
+                        } else {
+                            oggetto[proprietà] = (tipoInput === 'number') ? parseFloat(nuovoValore) : nuovoValore;
+                        }
+                        self.disegnaAlberoVisivo(); // Ridisegna l'albero per mostrare la modifica
+                    });
+                };
+                return span;
+            };
+
+            // AGGIUNGIAMO I CAMPI IN BASE AL TIPO DI PRODOTTO
+            rigaTop.appendChild(document.createTextNode("Nome: "));
+            rigaTop.appendChild(creaCampoEditabile(nodo, 'nome', 'text'));
+
+            if (nodo.tipo === "COMPOSTO") {
+                rigaTop.appendChild(document.createTextNode(" | Desc: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'descrizione', 'text'));
+                rigaTop.appendChild(document.createTextNode(" | P.Min: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMin', 'number'));
+                rigaTop.appendChild(document.createTextNode(" | P.Max: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMax', 'number'));
+            }
 
             var btnContainer = document.createElement("span");
             btnContainer.style.marginLeft = "15px";
@@ -656,6 +779,8 @@
                         this.hide(); 
                         
                         // Per pulizia, ordiniamo anche un reset delle cache forzando un ricaricamento la prossima volta
+						form.reset();
+						this.loadSkus();
                         this.loadProdottiDisponibili();
                     } else {
                         this.alertContainer.textContent = "Errore salvataggio: " + req.responseText;
@@ -671,7 +796,8 @@
         var alertGlobalId = "id_alertGlobal";
 
         // inizializziamo le varie sezioni della pag
-        this.catalogo = new GestoreCatalogo("sezioneCatalogo", "id_tabellaProdottiBody", alertGlobalId);
+        this.catalogo = new GestoreCatalogo("sezioneCatalogo", "id_formRicerca", "id_tableRisultatiRicerca", "id_bodyRisultatiRicerca", "id_alertGlobal");
+		
         this.creazione = new GestoreCreazione("sezioneCreazione", alertGlobalId);
 
         this.start = function() {

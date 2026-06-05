@@ -99,19 +99,32 @@
     </div>
 
     <div id="sezioneCatalogo" style="display: none;">
-        <h2>I tuoi Prodotti</h2>
-        <table class="boxed">
+        <h2>Ricerca nel Catalogo</h2>
+        
+        <form id="id_formRicerca" action="#">
+            <input type="text" name="keyword" placeholder="Cerca prodotto o SKU..." required>
+            <input type="button" value="Cerca">
+        </form>
+        <br>
+
+        <table class="boxed" id="id_tableRisultatiRicerca" style="display:none; width: 100%;">
             <thead>
                 <tr>
                     <th>Codice</th>
-                    <th>Nome</th>
                     <th>Tipo</th>
+                    <th>Nome</th>
                     <th>Azioni</th>
                 </tr>
             </thead>
-            <tbody id="id_tabellaProdottiBody">
-                </tbody>
+            <tbody id="id_bodyRisultatiRicerca">
+            </tbody>
         </table>
+
+        <div id="id_alberoRicercaArea" style="display: none; margin-top: 20px; padding: 10px; border: 1px solid #4CAF50;">
+            <h3>Dettaglio Albero</h3>
+            <div id="id_alberoRicercaDisplay"></div>
+            <button id="id_btnSalvaModificheRicerca" style="background:orange; margin-top:15px;">Salva Modifiche al Catalogo</button>
+        </div>
     </div>
 
 </body>
