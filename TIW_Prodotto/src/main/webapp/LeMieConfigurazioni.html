@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Le Mie Configurazioni - TIW</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1 th:text="'Le configurazioni di ' + ${session.utente.nome} + ' ' + ${session.utente.cognome}">Le Mie Configurazioni</h1>
+        <div class="header-buttons">
+            <a th:href="@{/GoToHomeCliente}"><button>Home</button></a>
+            <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
+        </div>
+    </div>
+
+    <div class="container main-container">
+
+        <div th:if="${errore != null}">
+            <p class="error-message" th:text="${errore}"></p>
+        </div>
+
+        <div th:if="${#lists.isEmpty(configurazioni)}" style="grid-column: 1 / -1;">
+            <p class="empty-message">Non hai ancora salvato nessuna configurazione.</p>
+        </div>
+
+        <div th:if="${not #lists.isEmpty(configurazioni)}" style="grid-column: 1 / -1;">
+            <div th:each="config : ${configurazioni}" class="product-card" style="display: flex; justify-content: space-between; align-items: center;">
+
+                <div>
+                    <h3 th:text="${config.nome}" style="margin: 0 0 5px 0;"></h3>
+                    <p style="margin: 0; color: var(--text-muted); font-size: 0.9em;"
+                       th:text="'Prodotto: ' + ${config.prodotto.nome}"></p>
+                    <p style="margin: 4px 0 0 0; font-size: 0.85em; color: #888;"
+                       th:text="'Creata il: ' + ${config.dataCreazione}
+                                + (${config.dataUltimaModifica} != null ? '  —  Modificata il: ' + ${config.dataUltimaModifica} : '')">
+                    </p>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+                    <strong th:text="${config.prezzoTotale} + ' €'" style="font-size: 1.1em;"></strong>
+
+                    <a th:href="@{/GoToDettaglioConfigurazione(idConfig=${config.id})}">
+                        <button style="width: auto; padding: 8px 14px; margin: 0; background-color: var(--primary-color);">Dettaglio</button>
+                    </a>
+                    
+                    <a th:href="@{/GoToSceltaSku(codiceProdotto=${config.prodotto.codice}, idConfig=${config.id})}">
+    						<button style="width: auto; padding: 8px 14px; margin: 0; background-color: #17a2b8;">Modifica</button>
+					</a>
+
+                    <form th:action="@{/ClonaConfigurazione}" method="POST" style="margin: 0;">
+                        <input type="hidden" name="idConfig" th:value="${config.id}">
+                        <button type="submit" style="width: auto; padding: 8px 14px; margin: 0; background-color: #6f42c1;">Clona</button>
+                    </form>
+
+                    <form th:action="@{/EliminaConfigurazione}" method="POST" style="margin: 0;"
+                          onsubmit="return confirm('Sei sicuro di voler eliminare questa configurazione?')">
+                        <input type="hidden" name="idConfig" th:value="${config.id}">
+                        <button type="submit" class="btn-elimina" style="margin: 0;">Elimina</button>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

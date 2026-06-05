@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Accesso Applicazione</title>
+    <link rel="stylesheet" type="text/css" media="all" href="css/style.css" />
+    <script src="js/utils.js" charset="utf-8" defer></script>
+    <script src="js/loginManagement.js" charset="utf-8" defer></script>
+</head>
+<body>
+    <h1>Benvenuto nel Gestore Prodotti</h1>
+    
+    <div id="id_alert" class="alertmessage"></div>
+
+    <div style="display: flex; gap: 50px;">
+        <div>
+            <form id="id_loginform" action="#">
+                <fieldset>
+                    <legend>Login</legend>
+                    Username: <input type="text" name="username" required> <br>
+                    Password: <input type="password" name="password" required> <br>
+                    <input type="button" id="id_loginbutton" value="Accedi">
+                </fieldset>
+            </form>
+        </div>
+
+        <div>
+            <form id="id_registerform" action="#">
+                <fieldset>
+                    <legend>Registrazione</legend>
+                    Username: <input type="text" name="username" required> <br>
+                    Password: <input type="password" name="password" required> <br>
+                    Nome: <input type="text" name="nome" required> <br>
+                    Cognome: <input type="text" name="cognome" required> <br>
+                    Ruolo: 
+                    <select name="ruolo" required>
+                        <option value="CLIENTE">Cliente</option>
+                        <option value="FORNITORE">Fornitore</option>
+                    </select> <br>
+                    <input type="button" id="id_registerbutton" value="Registrati">
+                </fieldset>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

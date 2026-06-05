@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Dettaglio Configurazione - TIW</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1>Riepilogo Configurazione</h1>
+        <div class="header-buttons">
+            <a th:href="@{/GoToHomeCliente}"><button>Nuova Configurazione</button></a>
+            <a th:href="@{/GoToLeMieConfigurazioni}"><button class="btn-success">Le Mie Configurazioni</button></a>
+            <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
+        </div>
+    </div>
+
+    <div class="container main-container">
+        
+        <div class="column" style="grid-column: 1 / -1;">
+            <h2 th:text="${configurazione.nome} + ' (' + ${configurazione.prodotto.nome} + ')'" style="color: var(--primary-color);">Nome Configurazione</h2>
+            <p th:text="'Data di Creazione: ' + ${configurazione.dataCreazione}"></p>
+        </div>
+
+        <div class="column" style="grid-column: 1 / -1;">
+            <h3>Dettaglio Componenti Scelti</h3>
+
+            <div th:each="riga : ${configurazione.dettagli}" style="border-bottom: 1px solid var(--border-color); padding: 15px 0; display: flex; justify-content: space-between;">
+                
+                <div>
+                    <h4 th:text="${riga.componente.nome} + ' ➔ ' + ${riga.skuSelezionata.nome}" style="margin: 0 0 5px 0; color: var(--primary-color);"></h4>
+                    <div style="color: var(--text-muted); font-size: 0.9em;" th:text="${riga.skuSelezionata.descrizione}">Descrizione Tecnica</div>
+                    <small style="color: #888;" th:text="'Codice SKU: ' + ${riga.skuSelezionata.codice}"></small>
+                </div>
+                
+                <div style="font-weight: bold; font-size: 1.1em;" th:text="${riga.skuSelezionata.prezzo} + ' €'">0 €</div>
+            </div>
+
+            <div style="text-align: right; font-size: 1.5em; padding-top: 20px; margin-top: 20px; border-top: 2px solid var(--primary-color);">
+                <span>Prezzo Totale: </span>
+                <strong style="color: var(--success-color);" th:text="${configurazione.prezzoTotale} + ' €'">0.0 €</strong>
+            </div>
+            
+        </div>
+
+    </div>
+
+</body>
+</html>

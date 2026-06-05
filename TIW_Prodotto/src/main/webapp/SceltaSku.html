@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Configura il tuo Prodotto</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css" th:href="@{/css/style.css}">
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1>Configurazione: <span th:text="${prodottoRadice.nome}">Prodotto</span></h1>
+        <div class="header-buttons">
+            <a th:href="@{/GoToHomeCliente}"><button class="btn-danger">Home</button></a>
+            <a th:href="@{/GoToLeMieConfigurazioni}"><button class="btn-danger">Le Mie Configurazioni</button></a>
+            <a th:href="@{/GoToHomePage}"><button class="btn-danger">Logout</button></a>
+        </div>
+    </div>
+
+    <div class="container main-container">
+        
+        <div th:if="${errore != null}">
+            <p class="error-message" th:text="${errore}"></p>
+        </div>
+
+        <div class="column">
+            <h3 th:text="'Dettagli base: ' + ${prodottoRadice.nome}"></h3>
+            <p class="product-desc" th:text="${prodottoRadice.descrizione}"></p>
+            <p class="product-price" th:text="'Fascia di prezzo stimata: ' + ${prodottoRadice.prezzoMin} + ' € - ' + ${prodottoRadice.prezzoMax} + ' €'"></p>
+        </div>
+
+        <div class="column" style="grid-column: 1 / -1;">
+            <h3 th:text="${idConfigInModifica != null} ? 'Modifica la tua configurazione' : 'Seleziona i componenti'"></h3>
+            
+            <form th:action="@{/SalvaConfigurazione}" action="SalvaConfigurazione" method="POST">
+                
+                <div class="form-group config-name-box">
+                    <label for="nomeConfig">Dai un nome alla tua configurazione:</label>
+                    <input type="text" id="nomeConfig" name="nomeConfigurazione" th:value="${nomeConfigEsistente != null} ? ${nomeConfigEsistente} : ''" placeholder="Es: PC da Gaming..." required>
+                    <input type="hidden" name="codiceRadice" th:value="${prodottoRadice.codice}">
+                    <input type="hidden" th:if="${idConfigInModifica != null}" name="idConfigInModifica" th:value="${idConfigInModifica}">
+                </div>
+
+                <ul class="tree-container">
+                    <th:block th:replace="~{::stampaAlberoConfig(nodiGerarchia=${prodottoRadice.getComponenti()})}"></th:block>
+                </ul>
+
+                <button type="submit" class="btn-success btn-large"
+                        th:text="${idConfigInModifica != null} ? 'SALVA MODIFICHE' : 'SALVA CONFIGURAZIONE'">
+                    SALVA CONFIGURAZIONE
+                </button>
+                
+            </form>
+        </div>
+
+    </div>
+    
+     <th:block th:fragment="stampaAlberoConfig(nodiGerarchia)">
+        <li th:each="prod : ${nodiGerarchia}" class="tree-node">
+            
+            <th:block th:if="${prod.getComponenti() != null}">
+                <details th:open="${idConfigInModifica != null or sceltePrec != null}">
+                    <summary class="tree-title clickable-summary" th:text="${prod.nome}"></summary>
+                    <ul class="tree-list-composto" th:if="${not prod.getComponenti().isEmpty()}">
+                        <th:block th:replace="~{::stampaAlberoConfig(nodiGerarchia=${prod.getComponenti()})}"></th:block>
+                    </ul>
+                </details>
+            </th:block>
+            
+            <th:block th:if="${prod.getSkus() != null}">
+                <div class="sku-selection-row">
+                    <strong class="tree-title" th:text="${prod.nome}"></strong>
+                    
+                    <select class="select-sku styled-select" th:name="'sku_' + ${prod.codice}">
+                        <option value="" disabled
+                                th:selected="${sceltePrec == null or sceltePrec[prod.codice] == null}">
+                            -- Scegli una SKU --
+                        </option>
+                        <option th:each="sku : ${prod.getSkus()}"
+                                th:value="${sku.codice}"
+                                th:text="${sku.nome} + ' (' + ${sku.prezzo} + ' €)'"
+                                th:selected="${sceltePrec != null and sceltePrec[prod.codice] == sku.codice}">
+                        </option>
+                    </select>
+                </div>
+            </th:block>
+            
+        </li>
+    </th:block>
+
+
+</body>
+</html>
