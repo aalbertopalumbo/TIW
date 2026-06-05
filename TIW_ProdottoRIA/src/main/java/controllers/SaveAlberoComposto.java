@@ -3,6 +3,7 @@ package controllers;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 
 import jakarta.servlet.ServletContext;
@@ -104,13 +105,13 @@ public class SaveAlberoComposto extends HttpServlet {
 		int codice = nodo.get("codice").getAsInt();
 		String nome = nodo.get("nome").getAsString();
 		
-		// controllo per aggiungere o meno
 		boolean isNuovo = true;
 		if (nodo.has("isNuovo")) {
 			isNuovo = nodo.get("isNuovo").getAsBoolean();
 		}
 		
 		if (isNuovo) {
+			// INSERIMENTO PRODOTTO NUOVO
 			String sqlProd = "INSERT INTO Prodotto (codice, nome) VALUES (?, ?)";
 			try (PreparedStatement ps = con.prepareStatement(sqlProd)) {
 				ps.setInt(1, codice);
@@ -138,43 +139,65 @@ public class SaveAlberoComposto extends HttpServlet {
 					ps.executeUpdate();
 				}
 			}
-		}
-
-		// B. CREAZIONE LEGAMI RELAZIONALI (Questo si fa SEMPRE, anche per gli esistenti)
-		if (codicePadre != null) {
-			String sqlComp = "INSERT INTO Composizione (codice_padre, codice_figlio) VALUES (?, ?)";
-			try (PreparedStatement ps = con.prepareStatement(sqlComp)) {
-				ps.setInt(1, codicePadre);
+		} else {
+			// AGGIORNAMENTO PRODOTTO ESISTENTE (Per salvare l'Inline Editing locale!)
+			String updProd = "UPDATE Prodotto SET nome = ? WHERE codice = ?";
+			try (PreparedStatement ps = con.prepareStatement(updProd)) {
+				ps.setString(1, nome);
 				ps.setInt(2, codice);
 				ps.executeUpdate();
 			}
 		}
 
-		// se ha figli rifà la funzione ricorsivamente
+		// CREAZIONE LEGAMI: Evitiamo i duplicati controllando prima se esistono!
+		if (codicePadre != null) {
+			String checkRel = "SELECT 1 FROM Composizione WHERE codice_padre = ? AND codice_figlio = ?";
+			boolean exists = false;
+			try (PreparedStatement ps = con.prepareStatement(checkRel)) {
+				ps.setInt(1, codicePadre);
+				ps.setInt(2, codice);
+				try (ResultSet rs = ps.executeQuery()) { if (rs.next()) exists = true; }
+			}
+			if (!exists) {
+				String sqlComp = "INSERT INTO Composizione (codice_padre, codice_figlio) VALUES (?, ?)";
+				try (PreparedStatement ps = con.prepareStatement(sqlComp)) {
+					ps.setInt(1, codicePadre);
+					ps.setInt(2, codice);
+					ps.executeUpdate();
+				}
+			}
+		}
+
 		if (nodo.has("figli")) {
 			JsonArray figli = nodo.getAsJsonArray("figli");
 			for (JsonElement figlio : figli) {
-				salvaNodoRicorsivo(figlio.getAsJsonObject(), codice); 
+				salvaNodoRicorsivo(figlio.getAsJsonObject(), codice);
 			}
 		}
 		
-
-		// lega le sku esistenti
 		if (nodo.has("skus")) {
 			JsonArray skus = nodo.getAsJsonArray("skus");
+			String checkSku = "SELECT 1 FROM Realizzazione WHERE cod_prod_s = ? AND cod_sku = ?";
 			String sqlRel = "INSERT INTO Realizzazione (cod_prod_s, cod_sku) VALUES (?, ?)";
-			try (PreparedStatement ps = con.prepareStatement(sqlRel)) {
+			try (PreparedStatement psCheck = con.prepareStatement(checkSku);
+			     PreparedStatement psInsert = con.prepareStatement(sqlRel)) {
 				for (JsonElement skuElem : skus) {
-					ps.setInt(1, codice);
-					ps.setInt(2, skuElem.getAsInt());
-					ps.addBatch();
+					int codSku = skuElem.getAsInt();
+					psCheck.setInt(1, codice);
+					psCheck.setInt(2, codSku);
+					try (ResultSet rs = psCheck.executeQuery()) {
+						if (!rs.next()) { // Se l'associazione non esiste, la inseriamo!
+							psInsert.setInt(1, codice);
+							psInsert.setInt(2, codSku);
+							psInsert.executeUpdate();
+						}
+					}
 				}
-				ps.executeBatch();
 			}
 		}
 
-		// crea le nuove sku e mette in realizzazione
 		if (nodo.has("nuoveSkus")) {
+			// ... (Il blocco delle nuoveSkus rimane IDENTICO a quello che hai già) ...
 			JsonArray nuoveSkus = nodo.getAsJsonArray("nuoveSkus");
 			String sqlNuovaSku = "INSERT INTO Sku (codice, nome, foto, descrizione_tecnica, prezzo) VALUES (?, ?, ?, ?, ?)";
 			String sqlRel = "INSERT INTO Realizzazione (cod_prod_s, cod_sku) VALUES (?, ?)";
@@ -191,7 +214,6 @@ public class SaveAlberoComposto extends HttpServlet {
 					ps.setInt(5, nSku.get("prezzo").getAsInt());
 					ps.executeUpdate();
 				}
-
 				try (PreparedStatement ps = con.prepareStatement(sqlRel)) {
 					ps.setInt(1, codice);
 					ps.setInt(2, skuCod);

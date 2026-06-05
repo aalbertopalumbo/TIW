@@ -280,16 +280,13 @@
                 let selectedProdotti = Array.from(document.querySelectorAll("input[name='prodottiScelti']:checked"));
                 let figliIniziali = [];
                 
-                selectedProdotti.forEach(cb => {
+				selectedProdotti.forEach(cb => {
                     let prodDati = this.prodottiCache.find(p => p.codice === parseInt(cb.value));
                     if(prodDati) {
-                        figliIniziali.push({
-                            tipo: cb.dataset.tipo, // sa se semplice o composto
-                            isNuovo: false, // e vede se è già in db o nuovo in locale
-                            codice: prodDati.codice,
-                            nome: prodDati.nome,
-                            figli: [], skus: [], nuoveSkus: []
-                        });
+                        // LA MAGIA: Cloniamo profondamente l'intero albero prelevato dal DB!
+                        // Così possiamo modificarlo, eliminare i suoi figli ecc. senza corrompere la cache originale.
+                        let cloneAlbero = JSON.parse(JSON.stringify(prodDati));
+                        figliIniziali.push(cloneAlbero);
                     }
                 });
 
@@ -398,24 +395,35 @@
                 ulSkus.style.margin = "5px 0 10px 20px";
                 ulSkus.style.fontSize = "13px";
                 
-                // disegna sku esistenti
+                // Funzione di sicurezza condivisa per l'eliminazione
+                const tentaEliminazioneSku = (arrayDiAppartenenza, indice) => {
+                    let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
+                    if (totaleSkus <= 1) {
+                        alert("Azione negata: Un prodotto semplice deve avere almeno una SKU associata");
+                        return;
+                    }
+                    arrayDiAppartenenza.splice(indice, 1);
+                    this.disegnaAlberoVisivo();
+                };
+
+                // Disegna SKU esistenti
                 if (nodo.skus) {
                     nodo.skus.forEach((codiceSku, idx) => {
                         let skuDati = this.skusCache.find(x => x.codice == codiceSku);
                         let nomeMostrato = skuDati ? skuDati.nome : "SKU " + codiceSku;
                         let li = document.createElement("li");
                         li.innerHTML = `[${codiceSku}] ${nomeMostrato} (Esistente) <button style="margin-left:5px;">-</button>`;
-                        li.querySelector("button").onclick = () => { nodo.skus.splice(idx, 1); this.disegnaAlberoVisivo(); };
+                        li.querySelector("button").onclick = () => tentaEliminazioneSku(nodo.skus, idx);
                         ulSkus.appendChild(li);
                     });
                 }
                 
-                // disegna nuove sku create in locale
+                // Disegna Nuove SKU
                 if (nodo.nuoveSkus) {
                     nodo.nuoveSkus.forEach((skuObj, idx) => {
                         let li = document.createElement("li");
                         li.innerHTML = `[${skuObj.codice}] ${skuObj.nome} - ${skuObj.prezzo}€ <strong style="color:green;">(NUOVA)</strong> <button style="margin-left:5px;">-</button>`;
-                        li.querySelector("button").onclick = () => { nodo.nuoveSkus.splice(idx, 1); this.disegnaAlberoVisivo(); };
+                        li.querySelector("button").onclick = () => tentaEliminazioneSku(nodo.nuoveSkus, idx);
                         ulSkus.appendChild(li);
                     });
                 }
@@ -491,9 +499,17 @@
                 `;
                 var areaDettagli = formArea.querySelector("#divDettagliAggiunta");
 
-                // sku esistente dalla cache
+                // sku esistente dalla cache NASCONDE QUELLE GIA' PRESENTI)
                 formArea.querySelector("#btnSceltaSkuEsistente").onclick = () => {
-                    let checkboxesHTML = self.skusCache.map(sku => 
+                    // FILTRO: Prendi dalla cache solo le sku che NON sono in nodoPadre.skus
+                    let skuDisponibili = self.skusCache.filter(sku => !nodoPadre.skus.includes(sku.codice));
+
+                    if (skuDisponibili.length === 0) {
+                        areaDettagli.innerHTML = `<p style="color:red;">Tutte le SKU disponibili sono già associate a questo prodotto!</p>`;
+                        return;
+                    }
+
+                    let checkboxesHTML = skuDisponibili.map(sku => 
                         `<label style="display:block;"><input type="checkbox" name="tmp_sku_add" value="${sku.codice}"> [${sku.codice}] ${sku.nome}</label>`
                     ).join("");
 
@@ -504,7 +520,7 @@
                         <button id="btnConfermaEsistente" style="background:green; color:white;">Aggiungi Selezionate</button>
                     `;
                     areaDettagli.querySelector("#btnConfermaEsistente").onclick = () => {
-                        let selectedSkus = Array.from(areaDettagli.querySelectorAll("input[name='tmp_sku_add']:checked")).map(cb => cb.value);
+                        let selectedSkus = Array.from(areaDettagli.querySelectorAll("input[name='tmp_sku_add']:checked")).map(cb => parseInt(cb.value));
                         if(selectedSkus.length === 0) return;
                         
                         selectedSkus.forEach(s => { 
@@ -514,19 +530,32 @@
                     };
                 };
 
-                // nuova sku crea in locale e salviamo dopo
+                // Nuova SKU (Controllo duplicati prima di crearla!)
                 formArea.querySelector("#btnSceltaNuovaSku").onclick = () => {
                     areaDettagli.innerHTML = `
-                        <input type="text" id="tmp_sku_codice" placeholder="Codice" size="5" required>
+                        <input type="number" id="tmp_sku_codice" placeholder="Codice" style="width: 60px;" required>
                         <input type="text" id="tmp_sku_nome" placeholder="Nome" required>
                         <input type="text" id="tmp_sku_foto" placeholder="Foto URL" required>
-                        <input type="number" id="tmp_sku_prezzo" placeholder="Prezzo" size="5" required>
+                        <input type="number" id="tmp_sku_prezzo" placeholder="Prezzo" style="width: 60px;" required>
                         <input type="text" id="tmp_sku_desc" placeholder="Descrizione" required>
-                        <button id="btnConfermaNuova" style="background:green; color:white;">Crea e Aggiungi</button>
+                        <button id="btnConfermaNuova" style="background:green; color:white;">Crea</button>
                     `;
                     areaDettagli.querySelector("#btnConfermaNuova").onclick = () => {
+                        let nuovoCodice = parseInt(areaDettagli.querySelector("#tmp_sku_codice").value);
+                        
+                        // CONTROLLO DI SICUREZZA 1: Esiste già nel DB?
+                        if (self.skusCache.some(s => s.codice === nuovoCodice)) {
+                            alert("Errore: Esiste già una SKU nel catalogo con questo codice.");
+                            return;
+                        }
+                        // CONTROLLO DI SICUREZZA 2: L'ho appena creata in questo nodo?
+                        if (nodoPadre.nuoveSkus.some(s => s.codice === nuovoCodice)) {
+                            alert("Errore: Hai già inserito una Nuova SKU con questo codice.");
+                            return;
+                        }
+
                         nodoPadre.nuoveSkus.push({
-                            codice: areaDettagli.querySelector("#tmp_sku_codice").value,
+                            codice: nuovoCodice,
                             nome: areaDettagli.querySelector("#tmp_sku_nome").value,
                             foto: areaDettagli.querySelector("#tmp_sku_foto").value,
                             prezzo: areaDettagli.querySelector("#tmp_sku_prezzo").value,
@@ -539,21 +568,49 @@
         };
 
         // salva e manda al server
+		// 4. L'EVENTO FINALE DEL BOTTONE ARANCIONE: SPEDIZIONE AL SERVER!
         document.getElementById("id_btnSalvaAlberoFinale").addEventListener('click', () => {
             if (!this.alberoCorrente) return;
+
+            // VALIDAZIONE RIGOROSA DELLE SPECIFICHE PRIMA DI SPEDIRE
+            const validaAlbero = (nodo) => {
+                if (nodo.tipo === "COMPOSTO") {
+                    if (!nodo.figli || nodo.figli.length < 1) {
+                        alert(`ERRORE: Il Prodotto Composto [${nodo.codice}] "${nodo.nome}" deve avere almeno 1 sottoprodotto. Aggiungine altri o rimuovi questo nodo.`);
+                        return false;
+                    }
+                    for (let figlio of nodo.figli) {
+                        if (!validaAlbero(figlio)) return false;
+                    }
+                } else if (nodo.tipo === "SEMPLICE") {
+                    let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
+                    if (totaleSkus < 1) {
+                        alert(`ERRORE: Il Prodotto Semplice [${nodo.codice}] "${nodo.nome}" deve avere almeno 1 SKU.`);
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            // Se la validazione fallisce, fermiamo tutto!
+            if (!validaAlbero(this.alberoCorrente)) {
+                return;
+            }
             
-            // impacchettiamo tutto in json
+            // Impacchettiamo l'intero mostro in JSON
             var formData = new FormData();
             formData.append("alberoJSON", JSON.stringify(this.alberoCorrente));
-			formData.append("daEliminareJSON", JSON.stringify(this.nodiDaEliminare));
+            formData.append("daEliminareJSON", JSON.stringify(this.nodiDaEliminare));
 
             makeCall("POST", "SaveAlberoComposto", formData, (req) => {
                 if (req.readyState === XMLHttpRequest.DONE) {
                     if (req.status === 200) {
                         this.alertContainer.textContent = "ALBERO SALVATO NEL DATABASE CON SUCCESSO!";
                         this.alertContainer.style.color = "green";
-                        this.hide(); // chiude costruttore e torna alla schermata principale
-						
+                        this.hide(); 
+                        
+                        // Per pulizia, ordiniamo anche un reset delle cache forzando un ricaricamento la prossima volta
+                        this.loadProdottiDisponibili();
                     } else {
                         this.alertContainer.textContent = "Errore salvataggio: " + req.responseText;
                         this.alertContainer.style.color = "red";
