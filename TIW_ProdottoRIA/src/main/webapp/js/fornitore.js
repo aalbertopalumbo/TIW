@@ -309,6 +309,7 @@
                 document.getElementById("id_costruttoreAlbero").style.display = "block";
                 
                 this.nodiDaEliminare = []; // resetta la lista ad ogni nuova creazione
+				this.relazioniDaEliminare = [];
                 this.disegnaAlberoVisivo();
             } else { form.reportValidity(); }
         });
@@ -413,20 +414,37 @@
                 };
 
                 // Disegna SKU esistenti
-				li.querySelector("button").onclick = () => { 
-                    this.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: codiceSku });
-                    tentaEliminazioneSku(nodo.skus, idx); 
-                };
-                if (nodo.skus) {
+				if (nodo.skus) {
                     nodo.skus.forEach((codiceSku, idx) => {
                         let skuDati = this.skusCache.find(x => x.codice == codiceSku);
                         let nomeMostrato = skuDati ? skuDati.nome : "SKU " + codiceSku;
                         let li = document.createElement("li");
-                        li.innerHTML = `[${codiceSku}] ${nomeMostrato} (Esistente) <button style="margin-left:5px;">-</button>`;
-                        li.querySelector("button").onclick = () => tentaEliminazioneSku(nodo.skus, idx);
+                        
+                        // ORA ABBIAMO ENTRAMBI I BOTTONI (- e *)
+                        li.innerHTML = `[${codiceSku}] ${nomeMostrato} (Esistente) 
+                                        <button class="btn-minus" style="margin-left:5px;" title="Rimuovi legame">-</button>
+                                        <button class="btn-star" style="margin-left:5px;" title="Elimina dal DB">*</button>`;
+                        
+                        // TASTO MENO: Spezza il legame
+                        li.querySelector(".btn-minus").onclick = () => { 
+                            this.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: codiceSku });
+                            tentaEliminazioneSku(nodo.skus, idx); 
+                        };
+
+                        // TASTO STELLA: Cancella dal DB!
+                        li.querySelector(".btn-star").onclick = () => { 
+                            // Controllo frontend preventivo: non ti faccio nemmeno cliccare se è l'ultima!
+                            let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
+                            if (totaleSkus <= 1) {
+                                alert("Azione negata: Questa è l'unica SKU in questa schermata. Se la elimini dal DB il prodotto semplice rimarrà vuoto!");
+                                return;
+                            }
+                            this.nodiDaEliminare.push({ tipo: "SKU", codice: codiceSku });
+                            tentaEliminazioneSku(nodo.skus, idx); 
+                        };
                         ulSkus.appendChild(li);
                     });
-                }
+                };
                 
                 // Disegna Nuove SKU
                 if (nodo.nuoveSkus) {
@@ -480,18 +498,35 @@
                     };
                 };
 
-                formArea.querySelector("#btnSceltaSemplice").onclick = () => {
+				formArea.querySelector("#btnSceltaSemplice").onclick = () => {
+                    // Creiamo le checkbox prendendole dalla cache!
+                    let checkboxesHTML = self.skusCache.map(sku => 
+                        `<label style="display:block;"><input type="checkbox" name="tmp_sku_nuovosemplice" value="${sku.codice}"> [${sku.codice}] ${sku.nome}</label>`
+                    ).join("");
+
                     areaDettagli.innerHTML = `
                         <input type="text" id="tmp_codice_s" placeholder="Codice" size="5" required>
                         <input type="text" id="tmp_nome_s" placeholder="Nome" required>
+                        <p style="margin: 5px 0 2px 0; font-size: 12px;">Associa SKU:</p>
+                        <div style="height:80px; overflow-y:auto; border:1px solid #ccc; margin-bottom:5px; padding:3px; font-size:12px;">
+                            ${checkboxesHTML}
+                        </div>
                         <button id="btnConfermaSemplice" style="background:green; color:white;">OK</button>
                     `;
                     areaDettagli.querySelector("#btnConfermaSemplice").onclick = () => {
+                        // Leggiamo le SKU spuntate
+                        let selectedSkus = Array.from(areaDettagli.querySelectorAll("input[name='tmp_sku_nuovosemplice']:checked")).map(cb => parseInt(cb.value));
+                        if(selectedSkus.length === 0) {
+                            alert("Devi selezionare almeno una SKU per il prodotto semplice!");
+                            return;
+                        }
+
                         nodoPadre.figli.push({
                             tipo: "SEMPLICE",
+                            isNuovo: true,
                             codice: areaDettagli.querySelector("#tmp_codice_s").value,
                             nome: areaDettagli.querySelector("#tmp_nome_s").value,
-                            skus: [],
+                            skus: selectedSkus, // Le inseriamo subito!
                             nuoveSkus: []
                         });
                         self.disegnaAlberoVisivo();

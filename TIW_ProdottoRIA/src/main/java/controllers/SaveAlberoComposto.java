@@ -78,6 +78,26 @@ public class SaveAlberoComposto extends HttpServlet {
 				}
 			}
 			
+			String jsonRelazioni = request.getParameter("relazioniDaEliminareJSON");
+			if (jsonRelazioni != null && !jsonRelazioni.isEmpty()) {
+				JsonArray relDaEliminare = JsonParser.parseString(jsonRelazioni).getAsJsonArray();
+				dao.ProdottoDAO prodDao = new dao.ProdottoDAO(con);
+				
+				for (JsonElement el : relDaEliminare) {
+					JsonObject obj = el.getAsJsonObject();
+					String tipoRel = obj.get("tipoRel").getAsString();
+					int padre = obj.get("padre").getAsInt();
+					int figlio = obj.get("figlio").getAsInt();
+					
+					// Chiamate pulite al DAO!
+					if (tipoRel.equals("COMPOSIZIONE")) {
+						prodDao.rimuoviComposizione(padre, figlio);
+					} else if (tipoRel.equals("REALIZZAZIONE")) {
+						prodDao.rimuoviRealizzazione(padre, figlio);
+					}
+				}
+			}
+			
 			// parsing del JSON
 			JsonObject root = JsonParser.parseString(jsonAlbero).getAsJsonObject();
 			// faccio in modo ricorsivo
@@ -93,7 +113,8 @@ public class SaveAlberoComposto extends HttpServlet {
 			try { con.rollback(); } catch (SQLException ex) {} // revert
 			e.printStackTrace();
 			response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-			response.getWriter().println("Errore interno del DB: probabilmente uno dei codici inseriti esiste già.");
+			String msg = e.getMessage();
+			response.getWriter().println(msg != null ? msg : "Errore interno del DB.");
 		} finally {
 			try { con.setAutoCommit(true); } catch (SQLException ex) {}
 		}
