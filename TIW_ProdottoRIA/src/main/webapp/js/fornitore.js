@@ -3,7 +3,7 @@
     var orchestrator;
     var utenteLoggato;
 	
-	
+	// gestore per la ricerca dei prodotti
 	function GestoreCatalogo(containerId, formId, tableId, bodyRisultatiId, alertId) {
         this.container = document.getElementById(containerId);
         this.form = document.getElementById(formId);
@@ -11,6 +11,11 @@
         this.bodyRisultati = document.getElementById(bodyRisultatiId);
         this.alertContainer = document.getElementById(alertId);
         this.alberoArea = document.getElementById("id_alberoRicercaArea");
+        this.alberoDisplay = document.getElementById("id_alberoRicercaDisplay");
+
+        this.alberoCorrente = null;
+        this.nodiDaEliminare = [];
+        this.relazioniDaEliminare = [];
 
         this.show = function() {
             this.container.style.display = "block";
@@ -25,20 +30,21 @@
             this.alertContainer.textContent = "";
         };
 
-        // Click sul cerca
-        this.form.querySelector("input[type='button']").addEventListener('click', () => {
-            if (this.form.checkValidity()) {
-                let keyword = this.form.keyword.value;
-                
-                makeCall("GET", "GetRicercaProdotti?keyword=" + encodeURIComponent(keyword), null, (req) => {
+        var self = this;
+
+        // ricerca con keyword
+        this.form.querySelector("input[type='button']").addEventListener('click', function() {
+            if (self.form.checkValidity()) {
+                let keyword = self.form.keyword.value;
+                makeCall("GET", "GetRicercaProdotti?keyword=" + encodeURIComponent(keyword), null, function(req) {
                     if (req.readyState === XMLHttpRequest.DONE) {
                         if (req.status === 200) {
                             var risultati = JSON.parse(req.responseText);
-                            this.bodyRisultati.innerHTML = "";
-                            this.alberoArea.style.display = "none"; // nasconde un albero aperto prima
+                            self.bodyRisultati.innerHTML = "";
+                            self.alberoArea.style.display = "none"; 
                             
                             if (risultati.length === 0) {
-                                this.bodyRisultati.innerHTML = "<tr><td colspan='4' style='text-align:center;'>Nessun risultato trovato.</td></tr>";
+                                self.bodyRisultati.innerHTML = "<tr><td colspan='4' style='text-align:center;'>Nessun risultato trovato.</td></tr>";
                             } else {
                                 risultati.forEach(r => {
                                     let tr = document.createElement("tr");
@@ -47,47 +53,199 @@
                                         <td style="border: 1px solid #ddd; padding: 8px;">[${r.tipo}]</td>
                                         <td style="border: 1px solid #ddd; padding: 8px;">${r.nome}</td>
                                         <td style="border: 1px solid #ddd; padding: 8px; text-align:center;">
-                                            <button type="button" class="btn-vedi" data-codice="${r.codice}" data-tipo="${r.tipo}">Vedi Dettaglio</button>
+                                            <button type="button" class="btn-vedi" data-codice="${r.codice}" data-tipo="${r.tipo}">Vedi Albero</button>
                                         </td>`;
-                                    this.bodyRisultati.appendChild(tr);
+                                    self.bodyRisultati.appendChild(tr);
                                 });
 
-                                // QUI PIÙ AVANTI AGGIUNGEREMO L'EVENTO DI CLICK SU "VEDI DETTAGLIO"
+                                // bottone per dettagli
+                                self.bodyRisultati.querySelectorAll('.btn-vedi').forEach(btn => {
+                                    btn.addEventListener('click', (e) => {
+                                        let cod = e.target.getAttribute("data-codice");
+                                        let tipo = e.target.getAttribute("data-tipo");
+                                        if (tipo === "SKU") {
+                                            self.caricaAlbero(cod, tipo);
+                                        }
+                                    });
+                                });
                             }
-                            this.table.style.display = "table"; // mostra la tabella
+                            self.table.style.display = "table"; 
                         } else {
-                            this.alertContainer.textContent = "Errore durante la ricerca.";
-                            this.alertContainer.style.color = "red";
+                            self.alertContainer.textContent = "Errore durante la ricerca.";
+                            self.alertContainer.style.color = "red";
                         }
                     }
                 });
-            } else { this.form.reportValidity(); }
+            } else { self.form.reportValidity(); }
         });
+
+        // 2. CHIAMATA ALLA NUOVA SERVLET
+        this.caricaAlbero = function(codice, tipo) {
+            makeCall("GET", "GetAlberoProdotto?codice=" + codice + "&tipo=" + tipo, null, function(req) {
+                if (req.readyState === XMLHttpRequest.DONE && req.status === 200) {
+                    self.alberoCorrente = JSON.parse(req.responseText);
+                    self.nodiDaEliminare = [];
+                    self.relazioniDaEliminare = [];
+                    self.disegnaAlberoVisivo();
+                    self.alberoArea.style.display = "block"; // Mostra l'area
+                }
+            });
+        };
+
+        // 3. DISEGNO RICORSIVO E INLINE EDITING (Senza bottoni +)
+        this.disegnaAlberoVisivo = function() {
+            this.alberoDisplay.innerHTML = "";
+            if (!this.alberoCorrente) return;
+            this.renderNodo(this.alberoCorrente, this.alberoDisplay, 1, null, -1);
+        };
+
+        this.renderNodo = function(nodo, container, livello, nodoPadre, indiceNelPadre) {
+            var nodoDiv = document.createElement("div");
+            nodoDiv.style.marginLeft = (livello === 1) ? "0px" : "30px";
+            nodoDiv.style.borderLeft = (livello === 1) ? "none" : "2px dashed #4CAF50";
+            nodoDiv.style.padding = "5px 10px";
+            nodoDiv.style.marginTop = "5px";
+
+            var rigaTop = document.createElement("div");
+            rigaTop.style.marginBottom = "5px";
+            var strongCodice = document.createElement("strong");
+            strongCodice.textContent = `[${nodo.tipo}] ${nodo.codice} - `;
+            rigaTop.appendChild(strongCodice);
+
+            // FUNZIONE INLINE EDITING LOCALE
+            const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
+                let span = document.createElement("span");
+                span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
+                span.style.color = "#4CAF50"; // Verde scuro per far capire che siamo nel catalogo
+                span.style.cursor = "pointer";
+                span.style.fontWeight = "bold";
+
+                span.onclick = function() {
+                    if (this.querySelector('input')) return; 
+                    var vecchioValore = oggetto[proprietà];
+                    this.textContent = '';
+                    var input = document.createElement('input');
+                    input.type = tipoInput;
+                    input.value = vecchioValore;
+                    if (tipoInput === 'number') input.style.width = "70px"; 
+                    
+                    this.appendChild(input);
+                    input.focus();
+
+                    input.addEventListener('mouseleave', () => {
+                        var nuovoValore = input.value.trim();
+                        if (nuovoValore === "" || (tipoInput === 'number' && parseFloat(nuovoValore) < 0)) {
+                            oggetto[proprietà] = vecchioValore;
+                        } else {
+                            oggetto[proprietà] = (tipoInput === 'number') ? parseFloat(nuovoValore) : nuovoValore;
+                        }
+                        self.disegnaAlberoVisivo(); 
+                    });
+                };
+                return span;
+            };
+
+            // ATTACCHIAMO I CAMPI (Modificabili!)
+            rigaTop.appendChild(document.createTextNode("Nome: "));
+            rigaTop.appendChild(creaCampoEditabile(nodo, 'nome', 'text'));
+
+            if (nodo.tipo === "COMPOSTO") {
+                rigaTop.appendChild(document.createTextNode(" | Desc: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'descrizione', 'text'));
+                rigaTop.appendChild(document.createTextNode(" | P.Min: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMin', 'number'));
+                rigaTop.appendChild(document.createTextNode(" | P.Max: "));
+                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMax', 'number'));
+            }
+
+            // BOTTONI DI RIMOZIONE (- e -*)
+            var btnContainer = document.createElement("span");
+            btnContainer.style.marginLeft = "15px";
+
+            if (livello > 1) { // Non puoi eliminare la radice da se stessa
+                var btnRemoveRel = document.createElement("button");
+                btnRemoveRel.textContent = "-";
+                btnRemoveRel.style.marginLeft = "5px";
+                btnRemoveRel.title = "Rimuovi legame";
+                btnRemoveRel.onclick = () => {
+                    self.relazioniDaEliminare.push({ tipoRel: "COMPOSIZIONE", padre: nodoPadre.codice, figlio: nodo.codice });
+                    nodoPadre.figli.splice(indiceNelPadre, 1);
+                    self.disegnaAlberoVisivo();
+                };
+                btnContainer.appendChild(btnRemoveRel);
+
+                var btnDelete = document.createElement("button");
+                btnDelete.textContent = "-*";
+                btnDelete.style.marginLeft = "5px";
+                btnDelete.title = "Cassa intero prodotto";
+                btnDelete.onclick = () => {
+                    self.nodiDaEliminare.push({ tipo: nodo.tipo, codice: nodo.codice });
+                    nodoPadre.figli.splice(indiceNelPadre, 1);
+                    self.disegnaAlberoVisivo();
+                };
+                btnContainer.appendChild(btnDelete);
+            }
+            rigaTop.appendChild(btnContainer);
+            nodoDiv.appendChild(rigaTop);
+
+            // RICORSIONE FIGLI
+            if (nodo.tipo === "COMPOSTO" && nodo.figli) {
+                nodo.figli.forEach((figlio, idx) => {
+                    self.renderNodo(figlio, nodoDiv, livello + 1, nodo, idx);
+                });
+            }
+
+            // STAMPA SKU (Modificabili e con bottoni - e -*)
+            if (nodo.tipo === "SEMPLICE" && nodo.skus) {
+                var ulSkus = document.createElement("ul");
+                ulSkus.style.margin = "5px 0 10px 20px";
+                ulSkus.style.fontSize = "13px";
+                
+                nodo.skus.forEach((skuObj, idx) => {
+                    let li = document.createElement("li");
+                    li.style.marginBottom = "3px";
+                    
+                    let strongCodice = document.createElement("strong");
+                    strongCodice.innerHTML = `[${skuObj.codice}] - Nome: `;
+                    li.appendChild(strongCodice);
+
+                    li.appendChild(creaCampoEditabile(skuObj, 'nome', 'text'));
+                    li.appendChild(document.createTextNode(" | P: "));
+                    li.appendChild(creaCampoEditabile(skuObj, 'prezzo', 'number'));
+                    li.appendChild(document.createTextNode(" | Desc: "));
+                    li.appendChild(creaCampoEditabile(skuObj, 'descrizione', 'text'));
+
+                    let btnMinus = document.createElement("button");
+                    btnMinus.textContent = "-";
+                    btnMinus.style.marginLeft = "5px";
+                    btnMinus.onclick = () => { 
+                        if (nodo.skus.length <= 1) { alert("Un prodotto semplice deve avere almeno una SKU!"); return; }
+                        self.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: skuObj.codice });
+                        nodo.skus.splice(idx, 1);
+                        self.disegnaAlberoVisivo();
+                    };
+                    li.appendChild(btnMinus);
+
+                    let btnStar = document.createElement("button");
+                    btnStar.textContent = "-*";
+                    btnStar.style.marginLeft = "5px";
+                    btnStar.onclick = () => { 
+                        if (nodo.skus.length <= 1) { alert("Azione negata: questa è l'unica SKU in questo prodotto!"); return; }
+                        self.nodiDaEliminare.push({ tipo: "SKU", codice: skuObj.codice });
+                        nodo.skus.splice(idx, 1);
+                        self.disegnaAlberoVisivo();
+                    };
+                    li.appendChild(btnStar);
+
+                    ulSkus.appendChild(li);
+                });
+                nodoDiv.appendChild(ulSkus);
+            }
+            container.appendChild(nodoDiv);
+        };
     }
 
 
-	// catalogo prodotti
-    function GestoreCatalogo(containerId, tbodyId, alertId) {
-        this.container = document.getElementById(containerId);
-        this.tbody = document.getElementById(tbodyId);
-        this.alertContainer = document.getElementById(alertId);
-
-        this.show = function() {
-            this.container.style.display = "block";
-            this.loadDati(); // quando mostro il catalogo prendo da db
-        };
-
-        this.hide = function() {
-            this.container.style.display = "none";
-            this.alertContainer.textContent = ""; // pulisce i dati
-        };
-
-        this.loadDati = function() {
-            // Qui più avanti metteremo makeCall("GET", "GetCatalogoFornitore" ...)
-            // e costruiremo i tag <tr> e <td>
-            console.log("Simulazione: Scaricamento dati catalogo da DB...");
-        };
-    }
 
     // teniamo un gestore per tutte le form di creazione
 	function GestoreCreazione(containerId, alertId) {

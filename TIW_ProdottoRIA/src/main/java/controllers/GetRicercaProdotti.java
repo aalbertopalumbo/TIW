@@ -18,6 +18,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import beans.Prodotto;
+import beans.ProdottoSemplice;
 import beans.Sku;
 import dao.ProdottoDAO;
 import dao.SkuDAO;
@@ -69,7 +70,7 @@ public class GetRicercaProdotti extends HttpServlet {
 				JsonObject obj = new JsonObject();
 				obj.addProperty("codice", p.getCodice());
 				obj.addProperty("nome", p.getNome());
-				obj.addProperty("tipo", p.getTipo().replace("PRODOTTO_", "")); 
+				obj.addProperty("tipo", (p instanceof ProdottoSemplice) ? "SEMPLICE" : "COMPOSTO"); 
 				jsonArray.add(obj);
 			}
 			// aggiunge le sku
