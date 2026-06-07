@@ -91,11 +91,12 @@ public class GetAlberoProdotto extends HttpServlet {
 						rootJson = convertiSempliceInJson(p, skus);
 					}
 				}
-		
-				response.setContentType("application/json");
-				response.setCharacterEncoding("UTF-8");
-				response.getWriter().write(new Gson().toJson(rootJson));
-				}
+			}
+			
+			response.setContentType("application/json");
+			response.setCharacterEncoding("UTF-8");
+			response.getWriter().write(new Gson().toJson(rootJson));
+				
 		} catch (SQLException e) {
 			response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
 		}

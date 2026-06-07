@@ -63,9 +63,7 @@
                                     btn.addEventListener('click', (e) => {
                                         let cod = e.target.getAttribute("data-codice");
                                         let tipo = e.target.getAttribute("data-tipo");
-                                        if (tipo === "SKU") {
-                                            self.caricaAlbero(cod, tipo);
-                                        }
+                                        self.caricaAlbero(cod, tipo);
                                     });
                                 });
                             }
@@ -92,7 +90,7 @@
             });
         };
 
-        // 3. DISEGNO RICORSIVO E INLINE EDITING (Senza bottoni +)
+        // disegna l'albero
         this.disegnaAlberoVisivo = function() {
             this.alberoDisplay.innerHTML = "";
             if (!this.alberoCorrente) return;
@@ -112,11 +110,11 @@
             strongCodice.textContent = `[${nodo.tipo}] ${nodo.codice} - `;
             rigaTop.appendChild(strongCodice);
 
-            // FUNZIONE INLINE EDITING LOCALE
+            // inline editing
             const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
                 let span = document.createElement("span");
                 span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
-                span.style.color = "#4CAF50"; // Verde scuro per far capire che siamo nel catalogo
+                span.style.color = "#4CAF50";
                 span.style.cursor = "pointer";
                 span.style.fontWeight = "bold";
 
@@ -145,7 +143,7 @@
                 return span;
             };
 
-            // ATTACCHIAMO I CAMPI (Modificabili!)
+            // campi modificabili in base al tipo
             rigaTop.appendChild(document.createTextNode("Nome: "));
             rigaTop.appendChild(creaCampoEditabile(nodo, 'nome', 'text'));
 
@@ -158,11 +156,11 @@
                 rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMax', 'number'));
             }
 
-            // BOTTONI DI RIMOZIONE (- e -*)
+            // tasti - e -*
             var btnContainer = document.createElement("span");
             btnContainer.style.marginLeft = "15px";
 
-            if (livello > 1) { // Non puoi eliminare la radice da se stessa
+            if (livello > 1) { // non puoi eliminare la radice
                 var btnRemoveRel = document.createElement("button");
                 btnRemoveRel.textContent = "-";
                 btnRemoveRel.style.marginLeft = "5px";
@@ -177,7 +175,7 @@
                 var btnDelete = document.createElement("button");
                 btnDelete.textContent = "-*";
                 btnDelete.style.marginLeft = "5px";
-                btnDelete.title = "Cassa intero prodotto";
+                btnDelete.title = "Rimuovi intero prodotto";
                 btnDelete.onclick = () => {
                     self.nodiDaEliminare.push({ tipo: nodo.tipo, codice: nodo.codice });
                     nodoPadre.figli.splice(indiceNelPadre, 1);
@@ -188,14 +186,14 @@
             rigaTop.appendChild(btnContainer);
             nodoDiv.appendChild(rigaTop);
 
-            // RICORSIONE FIGLI
+            // ricorsione nodi figli
             if (nodo.tipo === "COMPOSTO" && nodo.figli) {
                 nodo.figli.forEach((figlio, idx) => {
                     self.renderNodo(figlio, nodoDiv, livello + 1, nodo, idx);
                 });
             }
 
-            // STAMPA SKU (Modificabili e con bottoni - e -*)
+            // sku per i semplici
             if (nodo.tipo === "SEMPLICE" && nodo.skus) {
                 var ulSkus = document.createElement("ul");
                 ulSkus.style.margin = "5px 0 10px 20px";
@@ -219,7 +217,7 @@
                     btnMinus.textContent = "-";
                     btnMinus.style.marginLeft = "5px";
                     btnMinus.onclick = () => { 
-                        if (nodo.skus.length <= 1) { alert("Un prodotto semplice deve avere almeno una SKU!"); return; }
+                        if (nodo.skus.length <= 1) { alert("Un prodotto semplice deve avere almeno una SKU"); return; }
                         self.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: skuObj.codice });
                         nodo.skus.splice(idx, 1);
                         self.disegnaAlberoVisivo();
@@ -230,7 +228,7 @@
                     btnStar.textContent = "-*";
                     btnStar.style.marginLeft = "5px";
                     btnStar.onclick = () => { 
-                        if (nodo.skus.length <= 1) { alert("Azione negata: questa è l'unica SKU in questo prodotto!"); return; }
+                        if (nodo.skus.length <= 1) { alert("Azione negata: questa è l'unica SKU del prodotto"); return; }
                         self.nodiDaEliminare.push({ tipo: "SKU", codice: skuObj.codice });
                         nodo.skus.splice(idx, 1);
                         self.disegnaAlberoVisivo();
@@ -570,16 +568,16 @@
 
             var self = this;
 
-            // FUNZIONE MAGICA: Crea un testo blu cliccabile che diventa un input
+            // crea un testo blu cliccabile che diventa un input
             const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
                 let span = document.createElement("span");
                 span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
-                span.style.color = "#2196F3"; // Colore blu per indicare che è cliccabile
+                span.style.color = "#2196F3"; // colore blu per indicare che è cliccabile
                 span.style.cursor = "pointer";
                 span.style.fontWeight = "bold";
 
                 span.onclick = function() {
-                    if (this.querySelector('input')) return; // Evita doppi click
+                    if (this.querySelector('input')) return; // evita doppi click
                     var vecchioValore = oggetto[proprietà];
                     
                     this.textContent = '';
@@ -591,11 +589,11 @@
                     this.appendChild(input);
                     input.focus();
 
-                    // Quando sposti il mouse fuori (mouseleave), salva nell'oggetto Javascript locale
+                    // Quando sposti il mouse salva nell'oggetto Javascript locale
                     input.addEventListener('mouseleave', () => {
                         var nuovoValore = input.value.trim();
                         if (nuovoValore === "" || (tipoInput === 'number' && parseFloat(nuovoValore) < 0)) {
-                            oggetto[proprietà] = vecchioValore; // Valore non valido, annulla
+                            oggetto[proprietà] = vecchioValore; // valore non valido, annulla
                         } else {
                             oggetto[proprietà] = (tipoInput === 'number') ? parseFloat(nuovoValore) : nuovoValore;
                         }
