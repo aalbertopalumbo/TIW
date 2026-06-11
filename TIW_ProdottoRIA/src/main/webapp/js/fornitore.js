@@ -1,21 +1,783 @@
-(function() { // mettiamo tutto in una function per non mettere variabili globali e tenere in scope
+/**
+ * Gestione lato fornitore (single page).
+ * Tutto dentro una IIFE per non sporcare lo scope globale.
+ *
+ * Componenti:
+ *  - AlberoProdotto : editor riutilizzabile dell'albero di un prodotto (creazione E catalogo)
+ *  - GestoreCreazione : le 3 form (SKU / semplice / composto) + costruzione albero composto
+ *  - GestoreCatalogo : ricerca + modifica nel catalogo
+ *  - PageOrchestrator : coordina i componenti
+ *
+ * Modello dati unico di un nodo (lo stesso che usano i servlet):
+ *  COMPOSTO: { tipo:"COMPOSTO", codice, nome, descrizione, prezzoMin, prezzoMax, isNuovo, figli:[...] }
+ *  SEMPLICE: { tipo:"SEMPLICE", codice, nome, isNuovo, skus:[ skuObj ] }
+ *  skuObj  : { codice, nome, prezzo, descrizione, foto, isNuovo }
+ */
+(function() {
 
     var orchestrator;
     var utenteLoggato;
-	
-	// gestore per la ricerca dei prodotti
-	function GestoreCatalogo(containerId, formId, tableId, bodyRisultatiId, alertId) {
+
+    // la modifica inline per sku (usata da crea sku e da catalogo) diversa da modifica nel prodotto composto perché qui on mouseleave fa direttamente modifica in db
+    function campoSkuAutosave(codiceSku, campo, valore, numerico) {
+        var span = document.createElement("span");
+        span.className = "albero-campo";
+        span.textContent = (valore !== undefined && valore !== null) ? valore : "";
+
+        span.addEventListener("click", function() {
+			// click su elemento già cliccato non fa nulla
+            if (span.querySelector("input")) return; 
+            var vecchio = span.textContent;
+            span.textContent = "";
+
+            var input = document.createElement("input");
+            input.type = numerico ? "number" : "text";
+            input.value = vecchio;
+            span.appendChild(input);
+            input.focus();
+
+            input.addEventListener("mouseleave", function() {
+                var nuovo = input.value.trim();
+                if (nuovo === vecchio) { span.textContent = vecchio; return; }
+                if (nuovo === "" || (numerico && (isNaN(Number(nuovo)) || Number(nuovo) < 0))) {
+                    span.textContent = vecchio;
+                    alert("Valore non valido. Modifica annullata.");
+                    return;
+                }
+
+                var fd = new FormData();
+                fd.append("codice", codiceSku);
+                fd.append("campo", campo);
+                fd.append("valore", nuovo);
+                makeCall("POST", "UpdateSkuInline", fd, function(req) {
+                    if (req.readyState === XMLHttpRequest.DONE) {
+                        if (req.status === 200) {
+                            span.textContent = nuovo;
+                        } else {
+                            span.textContent = vecchio;
+                            alert("Errore di salvataggio: " + req.responseText);
+                        }
+                    }
+                });
+            });
+        });
+        return span;
+    }
+
+
+    // l'albero dei prodotti, usato sia in creazione che in catalogo
+    function AlberoProdotto(displayEl, alertEl) {
+        this.display = displayEl;
+        this.alert = alertEl;
+        this.root = null;
+        this.nodiDaEliminare = [];       // [{tipo, codice}]
+        this.relazioniDaEliminare = [];  // [{tipoRel, padre, figlio}]
+
+        // undo/redo con lista singola e indice
+        this.history = [];   // ogni cella è una fotografia dell'albero 
+        this.indice = -1;    // posizione corrente nell'history
+
+        var self = this;
+
+        // si fa una copia per evitare di avere riferimenti diretti agli oggetti e di corrompere
+        function clona(obj) {
+            return (obj === null || obj === undefined) ? obj : JSON.parse(JSON.stringify(obj));
+        }
+
+        // barra undo/redo sopra all'albero
+        this.toolbar = document.createElement("div");
+        this.toolbar.className = "albero-toolbar";
+        this.btnUndo = document.createElement("button");
+        this.btnUndo.type = "button";
+        this.btnUndo.textContent = "↶ Undo";
+        this.btnUndo.addEventListener("click", function() { self.undo(); });
+        this.btnRedo = document.createElement("button");
+        this.btnRedo.type = "button";
+        this.btnRedo.textContent = "↷ Redo";
+        this.btnRedo.addEventListener("click", function() { self.redo(); });
+        this.toolbar.appendChild(this.btnUndo);
+        this.toolbar.appendChild(this.btnRedo);
+        if (this.display && this.display.parentNode) {
+            this.display.parentNode.insertBefore(this.toolbar, this.display);
+        }
+
+        // imposta la radice, azzera liste e riavvia la cronologia con lo stato iniziale
+        this.setRoot = function(node) {
+            self.root = node;
+            self.nodiDaEliminare = [];
+            self.relazioniDaEliminare = [];
+            self.history = [];
+            self.indice = -1;
+            self.salvaStato(); // inizio stato appena salvato
+        };
+
+        // mette lo stato in history
+        this.salvaStato = function() {
+            // se faccio undo, azione, redo resettato
+            self.history = self.history.slice(0, self.indice + 1);
+            self.history.push({
+                root: clona(self.root),
+                nodi: clona(self.nodiDaEliminare),
+                rel: clona(self.relazioniDaEliminare)
+            });
+            self.indice = self.history.length - 1;
+            self.aggiornaBottoni();
+        };
+
+        // ripristina allo stato puntato
+        this.ripristina = function(snap) {
+            self.root = clona(snap.root);
+            self.nodiDaEliminare = clona(snap.nodi);
+            self.relazioniDaEliminare = clona(snap.rel);
+            self.update();
+            self.aggiornaBottoni();
+        };
+
+        // ogni azione che modifica chiama commit per aggiornare liste
+        this.commit = function() {
+            self.salvaStato();
+            self.update();
+        };
+
+        this.undo = function() {
+            if (self.indice > 0) {
+                self.indice--;
+                self.ripristina(self.history[self.indice]);
+            }
+        };
+
+        this.redo = function() {
+            if (self.indice < self.history.length - 1) {
+                self.indice++;
+                self.ripristina(self.history[self.indice]);
+            }
+        };
+
+        // attiva e disattiva i bottoni
+        this.aggiornaBottoni = function() {
+            self.btnUndo.disabled = (self.indice <= 0);
+            self.btnRedo.disabled = (self.indice >= self.history.length - 1);
+        };
+
+        this.aggiornaBottoni(); // all'avvio entrambi disabilitati
+
+        // disegna tutto l'albero da zero
+        this.update = function() {
+            this.display.innerHTML = "";
+            this.display.classList.add("albero-display");
+            if (this.root) {
+                this.renderNodo(this.root, this.display, 1, null, -1);
+            }
+        };
+
+        // disegna un singolo nodo e si richiama sui figli
+        this.renderNodo = function(nodo, container, livello, nodoPadre, idx) {
+            var div = document.createElement("div");
+            div.className = "albero-nodo" + (livello > 1 ? " figlio" : "");
+
+            var riga = document.createElement("div");
+            riga.className = "albero-riga";
+            div.appendChild(riga);
+
+            var testa = document.createElement("strong");
+            testa.textContent = "[" + nodo.tipo + "] " + nodo.codice + " - ";
+            riga.appendChild(testa);
+
+            // attributi modificabili inline
+            riga.appendChild(document.createTextNode("Nome: "));
+            riga.appendChild(this.creaCampoEditabile(nodo, "nome", {}));
+
+            if (nodo.tipo === "COMPOSTO") {
+                riga.appendChild(document.createTextNode(" | Desc: "));
+                riga.appendChild(this.creaCampoEditabile(nodo, "descrizione", {}));
+                riga.appendChild(document.createTextNode(" | P.Min: "));
+                riga.appendChild(this.creaCampoEditabile(nodo, "prezzoMin", { numerico: true }));
+                riga.appendChild(document.createTextNode(" | P.Max: "));
+                riga.appendChild(this.creaCampoEditabile(nodo, "prezzoMax", { numerico: true }));
+            }
+
+            // bottoni del nodo
+            var bottoni = document.createElement("span");
+            bottoni.className = "albero-bottoni";
+
+            // area del menu +
+            var menuArea = document.createElement("div");
+            menuArea.className = "albero-menu";
+            menuArea.style.display = "none";
+
+            // + su composto entro i 4 livelli oppure su semplice
+            if ((nodo.tipo === "COMPOSTO" && livello < 4) || nodo.tipo === "SEMPLICE") {
+                var btnAdd = document.createElement("button");
+                btnAdd.textContent = "+";
+                btnAdd.title = "Aggiungi sottoprodotto / SKU";
+                btnAdd.addEventListener("click", function() { self.mostraMenuAggiunta(nodo, menuArea); });
+                bottoni.appendChild(btnAdd);
+            }
+
+            // - e -* solo dai figli in giù 
+            if (livello > 1) {
+                var btnRel = document.createElement("button");
+                btnRel.textContent = "-";
+                btnRel.title = "Rimuovi solo il legame col padre (il prodotto resta nel DB)";
+                btnRel.addEventListener("click", function() {
+                    if (nodo.isNuovo === false) {
+						// toglie solo composizione
+                        self.relazioniDaEliminare.push({ tipoRel: "COMPOSIZIONE", padre: nodoPadre.codice, figlio: nodo.codice });
+                    }
+                    nodoPadre.figli.splice(idx, 1);
+					// salva per undo
+                    self.commit();
+                });
+                bottoni.appendChild(btnRel);
+
+                var btnDel = document.createElement("button");
+                btnDel.textContent = "-*";
+                btnDel.title = "Elimina il prodotto e i suoi sottoprodotti dal DB";
+                btnDel.addEventListener("click", function() {
+                    if (nodo.isNuovo === false) {
+						// se non è un prodotto nuovo va in nodi da eliminare (altrimenti non serve e si toglie e basta)
+                        self.nodiDaEliminare.push({ tipo: nodo.tipo, codice: nodo.codice });
+                    }
+                    nodoPadre.figli.splice(idx, 1);
+                    self.commit();
+                });
+                bottoni.appendChild(btnDel);
+            }
+
+            riga.appendChild(bottoni);
+            div.appendChild(menuArea);
+
+            // figli dei composti (ricorsione)
+            if (nodo.tipo === "COMPOSTO" && nodo.figli) {
+                nodo.figli.forEach(function(figlio, i) {
+                    self.renderNodo(figlio, div, livello + 1, nodo, i);
+                });
+            }
+
+            // sku dei semplici
+            if (nodo.tipo === "SEMPLICE") {
+                if (!nodo.skus) nodo.skus = [];
+                var ul = document.createElement("ul");
+                ul.className = "albero-sku-list";
+                nodo.skus.forEach(function(sku, i) {
+                    ul.appendChild(self.renderSku(nodo, sku, i));
+                });
+                div.appendChild(ul);
+            }
+
+            container.appendChild(div);
+        };
+
+        // disegna una riga sku sotto un prodotto semplice
+        this.renderSku = function(nodoSemplice, sku, idx) {
+            var li = document.createElement("li");
+            li.className = "albero-sku";
+
+            var testa = document.createElement("strong");
+            testa.textContent = "[" + sku.codice + "] ";
+            li.appendChild(testa);
+
+            li.appendChild(document.createTextNode("Nome: "));
+            li.appendChild(this.creaCampoEditabile(sku, "nome", {}));
+            li.appendChild(document.createTextNode(" | Prezzo: "));
+            li.appendChild(this.creaCampoEditabile(sku, "prezzo", { numerico: true }));
+            li.appendChild(document.createTextNode(" | Desc: "));
+            li.appendChild(this.creaCampoEditabile(sku, "descrizione", {}));
+
+            if (sku.isNuovo) {
+                var tag = document.createElement("span");
+                tag.className = "nuova";
+                tag.textContent = " (NUOVA)";
+                li.appendChild(tag);
+            }
+
+            // - rimuovi associazione prodotto-sku
+            var btnRel = document.createElement("button");
+            btnRel.textContent = "-";
+            btnRel.title = "Rimuovi l'associazione tra prodotto e SKU";
+            btnRel.addEventListener("click", function() {
+				// impediamo anche lato client di togliere l'ultima sku
+                if (!self.controllaUltimaSku(nodoSemplice)) return;
+                if (sku.isNuovo === false) {
+					// qui invece che composizione è realizzazione
+                    self.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodoSemplice.codice, figlio: sku.codice });
+                }
+                nodoSemplice.skus.splice(idx, 1);
+                self.commit();
+            });
+            li.appendChild(btnRel);
+
+            // -* elimina la sku dal db
+            if (sku.isNuovo === false) {
+                var btnDel = document.createElement("button");
+                btnDel.textContent = "-*";
+                btnDel.title = "Elimina la SKU dalla base di dati";
+                btnDel.addEventListener("click", function() {
+                    if (!self.controllaUltimaSku(nodoSemplice)) return;
+                    self.nodiDaEliminare.push({ tipo: "SKU", codice: sku.codice });
+                    nodoSemplice.skus.splice(idx, 1);
+                    self.commit();
+                });
+                li.appendChild(btnDel);
+            }
+
+            return li;
+        };
+
+        // un prodotto semplice deve sempre avere almeno una sku
+        this.controllaUltimaSku = function(nodoSemplice) {
+            if (nodoSemplice.skus.length <= 1) {
+                alert("Un prodotto semplice deve avere almeno una SKU associata.");
+                return false;
+            }
+            return true;
+        };
+
+        // crea uno <span> cliccabile che diventa input, al mouseleave salva nel nodo locale
+        // il salvataggio in db avviene al SALVA
+        this.creaCampoEditabile = function(oggetto, prop, opts) {
+            opts = opts || {};
+            var span = document.createElement("span");
+            span.className = "albero-campo";
+            span.textContent = (oggetto[prop] !== undefined && oggetto[prop] !== null) ? oggetto[prop] : "";
+
+            span.addEventListener("click", function() {
+                if (span.querySelector("input")) return;
+                var vecchio = oggetto[prop];
+                span.textContent = "";
+
+                var input = document.createElement("input");
+                input.type = opts.numerico ? "number" : "text";
+                if (opts.numerico && opts.intero) input.step = "1";
+                input.value = vecchio;
+                span.appendChild(input);
+                input.focus();
+
+                input.addEventListener("mouseleave", function() {
+                    var v = input.value.trim();
+                    var valido = true;
+                    if (v === "") {
+                        valido = false;
+                    } else if (opts.numerico) {
+                        var n = Number(v);
+                        if (isNaN(n) || n < 0) valido = false;
+                        if (opts.intero && !Number.isInteger(n)) valido = false;
+                    }
+                    var cambiato = false;
+                    if (valido) {
+                        var nuovo = opts.numerico ? Number(v) : v;
+                        if (oggetto[prop] !== nuovo) {
+                            oggetto[prop] = nuovo;
+                            cambiato = true;
+                        }
+                    }
+                    // in history solo se cambiato davvero, altrimenti solo redraw
+                    if (cambiato) self.commit();
+                    else self.update();
+                });
+            });
+            return span;
+        };
+
+        // menu + dipende dal tipo del nodo
+        this.mostraMenuAggiunta = function(nodo, menuArea) {
+            menuArea.style.display = "block";
+
+            if (nodo.tipo === "COMPOSTO") {
+                menuArea.innerHTML =
+                    '<p><strong>Aggiungi sottoprodotto a: ' + nodo.nome + '</strong></p>' +
+                    '<button class="btn-comp">Sottoprodotto Composto</button> ' +
+                    '<button class="btn-sempl">Sottoprodotto Semplice</button> ' +
+                    '<button class="btn-annulla">Annulla</button>' +
+                    '<div class="albero-menu-dettagli"></div>';
+                var dett = menuArea.querySelector(".albero-menu-dettagli");
+                menuArea.querySelector(".btn-annulla").addEventListener("click", function() { menuArea.style.display = "none"; });
+
+                // nuovo sottoprodotto composto
+                menuArea.querySelector(".btn-comp").addEventListener("click", function() {
+                    dett.innerHTML =
+                        '<input type="number" class="t-cod" placeholder="Codice"> ' +
+                        '<input type="text" class="t-nome" placeholder="Nome"> ' +
+                        '<input type="text" class="t-desc" placeholder="Descrizione"> ' +
+                        '<input type="number" class="t-pmin" placeholder="P.Min"> ' +
+                        '<input type="number" class="t-pmax" placeholder="P.Max"> ' +
+                        '<button class="t-ok">OK</button>';
+                    dett.querySelector(".t-ok").addEventListener("click", function() {
+                        var cod = parseInt(dett.querySelector(".t-cod").value);
+                        var nome = dett.querySelector(".t-nome").value.trim();
+                        if (isNaN(cod) || nome === "") { alert("Codice e nome sono obbligatori."); return; }
+                        nodo.figli.push({
+                            tipo: "COMPOSTO", isNuovo: true, codice: cod, nome: nome,
+                            descrizione: dett.querySelector(".t-desc").value.trim(),
+                            prezzoMin: parseFloat(dett.querySelector(".t-pmin").value) || 0,
+                            prezzoMax: parseFloat(dett.querySelector(".t-pmax").value) || 0,
+                            figli: []
+                        });
+                        menuArea.style.display = "none";
+                        self.commit();
+                    });
+                });
+
+                // nuovo sottoprodotto semplice con scelta SKU esistenti
+                menuArea.querySelector(".btn-sempl").addEventListener("click", function() {
+                    self.caricaSkusEsistenti(function(skus) {
+                        var checks = skus.map(function(s) {
+                            return '<label><input type="checkbox" value="' + s.codice + '"> [' + s.codice + '] ' + s.nome + '</label>';
+                        }).join("");
+                        dett.innerHTML =
+                            '<input type="number" class="t-cod" placeholder="Codice"> ' +
+                            '<input type="text" class="t-nome" placeholder="Nome">' +
+                            '<p>Associa SKU:</p>' +
+                            '<div class="scroll-box">' + checks + '</div>' +
+                            '<button class="t-ok">OK</button>';
+                        dett.querySelector(".t-ok").addEventListener("click", function() {
+                            var cod = parseInt(dett.querySelector(".t-cod").value);
+                            var nome = dett.querySelector(".t-nome").value.trim();
+                            if (isNaN(cod) || nome === "") { alert("Codice e nome sono obbligatori."); return; }
+                            var scelte = Array.from(dett.querySelectorAll(".scroll-box input:checked"));
+                            if (scelte.length === 0) { alert("Seleziona almeno una SKU."); return; }
+                            var skusScelte = scelte.map(function(cb) {
+                                var s = skus.find(function(x) { return x.codice === parseInt(cb.value); });
+                                return { codice: s.codice, nome: s.nome, prezzo: s.prezzo, descrizione: s.descrizione, foto: s.foto, isNuovo: false };
+                            });
+                            nodo.figli.push({ tipo: "SEMPLICE", isNuovo: true, codice: cod, nome: nome, skus: skusScelte });
+                            menuArea.style.display = "none";
+                            self.commit();
+                        });
+                    });
+                });
+
+            } else if (nodo.tipo === "SEMPLICE") {
+                menuArea.innerHTML =
+                    '<p><strong>Aggiungi SKU a: ' + nodo.nome + '</strong></p>' +
+                    '<button class="btn-nuova">Nuova SKU</button> ' +
+                    '<button class="btn-esist">SKU Esistente</button> ' +
+                    '<button class="btn-annulla">Annulla</button>' +
+                    '<div class="albero-menu-dettagli"></div>';
+                var dett2 = menuArea.querySelector(".albero-menu-dettagli");
+                menuArea.querySelector(".btn-annulla").addEventListener("click", function() { menuArea.style.display = "none"; });
+
+                // nuova SKU al prodotto semplice
+                menuArea.querySelector(".btn-nuova").addEventListener("click", function() {
+                    dett2.innerHTML =
+                        '<input type="number" class="s-cod" placeholder="Codice"> ' +
+                        '<input type="text" class="s-nome" placeholder="Nome"> ' +
+                        '<input type="text" class="s-foto" placeholder="Foto URL"> ' +
+                        '<input type="number" step="0.01" class="s-prezzo" placeholder="Prezzo"> ' +
+                        '<input type="text" class="s-desc" placeholder="Descrizione"> ' +
+                        '<button class="s-ok">Crea</button>';
+                    dett2.querySelector(".s-ok").addEventListener("click", function() {
+                        var cod = parseInt(dett2.querySelector(".s-cod").value);
+                        var nome = dett2.querySelector(".s-nome").value.trim();
+                        var prezzo = parseFloat(dett2.querySelector(".s-prezzo").value);
+                        if (isNaN(cod) || nome === "" || isNaN(prezzo) || prezzo < 0) {
+                            alert("Codice, nome e prezzo (>= 0) sono obbligatori.");
+                            return;
+                        }
+                        if (nodo.skus.some(function(s) { return s.codice === cod; })) {
+                            alert("Una SKU con questo codice è già presente.");
+                            return;
+                        }
+                        nodo.skus.push({
+                            codice: cod, nome: nome,
+                            foto: dett2.querySelector(".s-foto").value,
+                            prezzo: prezzo,
+                            descrizione: dett2.querySelector(".s-desc").value,
+                            isNuovo: true
+                        });
+                        menuArea.style.display = "none";
+                        self.commit();
+                    });
+                });
+
+                // scelta di una o piu' SKU esistenti (toglie quelle gia' associate)
+                menuArea.querySelector(".btn-esist").addEventListener("click", function() {
+                    self.caricaSkusEsistenti(function(skus) {
+                        var disponibili = skus.filter(function(s) {
+                            return !nodo.skus.some(function(x) { return x.codice === s.codice; });
+                        });
+                        if (disponibili.length === 0) {
+                            dett2.innerHTML = '<p style="color:red;">Tutte le SKU sono gia' + "'" + ' associate a questo prodotto.</p>';
+                            return;
+                        }
+                        var checks = disponibili.map(function(s) {
+                            return '<label><input type="checkbox" value="' + s.codice + '"> [' + s.codice + '] ' + s.nome + '</label>';
+                        }).join("");
+                        dett2.innerHTML = '<div class="scroll-box">' + checks + '</div><button class="e-ok">Aggiungi selezionate</button>';
+                        dett2.querySelector(".e-ok").addEventListener("click", function() {
+                            var scelte = Array.from(dett2.querySelectorAll(".scroll-box input:checked"));
+                            if (scelte.length === 0) return;
+                            scelte.forEach(function(cb) {
+                                var s = disponibili.find(function(x) { return x.codice === parseInt(cb.value); });
+                                nodo.skus.push({ codice: s.codice, nome: s.nome, prezzo: s.prezzo, descrizione: s.descrizione, foto: s.foto, isNuovo: false });
+                            });
+                            menuArea.style.display = "none";
+                            self.commit();
+                        });
+                    });
+                });
+            }
+        };
+
+        // carica l'elenco delle sku esistenti 
+        this.caricaSkusEsistenti = function(cback) {
+            makeCall("GET", "GetSkus", null, function(req) {
+                if (req.readyState === XMLHttpRequest.DONE && req.status === 200) {
+                    cback(JSON.parse(req.responseText));
+                }
+            });
+        };
+
+        // controlla che tutti i prodotti siano in regola prima di spedire al server
+        this.validaNodo = function(nodo) {
+            if (nodo.tipo === "COMPOSTO") {
+                if (!nodo.figli || nodo.figli.length < 1) {
+                    alert('Il prodotto composto [' + nodo.codice + '] "' + nodo.nome + '" deve avere almeno 1 sottoprodotto.');
+                    return false;
+                }
+                for (var i = 0; i < nodo.figli.length; i++) {
+                    if (!this.validaNodo(nodo.figli[i])) return false;
+                }
+            } else if (nodo.tipo === "SEMPLICE") {
+                if (!nodo.skus || nodo.skus.length < 1) {
+                    alert('Il prodotto semplice [' + nodo.codice + '] "' + nodo.nome + '" deve avere almeno 1 SKU.');
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // salva l'albero e le eliminazioni nel db
+        this.salva = function(onSuccess) {
+            if (!this.root) return;
+            if (!this.validaNodo(this.root)) return;
+
+            var fd = new FormData();
+            fd.append("alberoJSON", JSON.stringify(this.root));
+            fd.append("daEliminareJSON", JSON.stringify(this.nodiDaEliminare));
+            fd.append("relazioniDaEliminareJSON", JSON.stringify(this.relazioniDaEliminare));
+
+            makeCall("POST", "SaveAlberoComposto", fd, function(req) {
+                if (req.readyState === XMLHttpRequest.DONE) {
+                    if (req.status === 200) {
+                        self.alert.textContent = "Salvataggio completato con successo!";
+                        self.alert.style.color = "green";
+                        if (onSuccess) onSuccess();
+                    } else {
+                        self.alert.textContent = "Errore salvataggio: " + req.responseText;
+                        self.alert.style.color = "red";
+                    }
+                }
+            });
+        };
+    }
+
+
+    // gestore di creazione con form
+    function GestoreCreazione(containerId, alertId) {
+        this.container = document.getElementById(containerId);
+        this.alertContainer = document.getElementById(alertId);
+        this.menuSkus = document.getElementById("id_menuSkus");
+
+        this.skusCache = [];
+        this.prodottiCache = [];
+
+        // editor dell'albero composto in costruzione
+        this.albero = new AlberoProdotto(document.getElementById("id_alberoDisplay"), this.alertContainer);
+
+        var self = this;
+
+        this.show = function() {
+            this.container.style.display = "flex";
+
+            // mostra le tre form
+            document.getElementById("id_formCreaSku").closest("div").style.display = "block";
+            document.getElementById("id_formCreaSemplice").closest("div").style.display = "block";
+            document.getElementById("id_formCreaComposto").closest("div").style.display = "block";
+
+            // nascondi dettagli e costruttore albero
+            document.getElementById("id_costruttoreAlbero").style.display = "none";
+            document.getElementById("id_dettaglioNuovaSku").style.display = "none";
+            document.getElementById("id_dettaglioNuovoSemplice").style.display = "none";
+
+			// per i semplici
+            this.loadSkus();
+			// per i composti
+            this.loadProdottiDisponibili();
+        };
+
+        this.hide = function() {
+            this.container.style.display = "none";
+            document.getElementById("id_costruttoreAlbero").style.display = "none";
+        };
+
+        // creazione sku con salvataggio immediato e dettaglio editabile
+        document.getElementById("id_submitCreateSku").addEventListener('click', function(e) {
+            var form = e.target.closest("form");
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            makeCall("POST", "CreateSku", form, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE) return;
+                if (req.status === 200) {
+                    var sku = JSON.parse(req.responseText);
+                    self.alertContainer.textContent = "SKU " + sku.nome + " creata.";
+                    self.alertContainer.style.color = "green";
+                    self.mostraDettaglioSku(sku);
+                    form.reset(); // svuotiamo solo se è andata a buon fine
+                    self.loadSkus();
+                } else {
+                    self.alertContainer.textContent = req.responseText;
+                    self.alertContainer.style.color = "red";
+                }
+            }, false); // in caso di errore non svuota la form
+        });
+
+        // mostra il pannello della sku appena creata, con campi a salvataggio immediato
+        this.mostraDettaglioSku = function(sku) {
+            document.getElementById("id_dettaglioNuovaSku").style.display = "block";
+            document.getElementById("id_skuCodiceDisplay").textContent = sku.codice;
+            this.popolaCampoAutosave("id_skuNomeDisplay", sku.codice, "nome", sku.nome, false);
+            this.popolaCampoAutosave("id_skuFotoDisplay", sku.codice, "foto", sku.foto, false);
+            this.popolaCampoAutosave("id_skuPrezzoDisplay", sku.codice, "prezzo", sku.prezzo, true);
+            this.popolaCampoAutosave("id_skuDescrizioneDisplay", sku.codice, "descrizione", sku.descrizione, false);
+        };
+
+        this.popolaCampoAutosave = function(spanId, codice, campo, valore, numerico) {
+            var span = document.getElementById(spanId);
+            span.textContent = "";
+            span.appendChild(campoSkuAutosave(codice, campo, valore, numerico));
+        };
+
+        // carica sku per il menu del prodotto semplice
+        this.loadSkus = function() {
+            makeCall("GET", "GetSkus", null, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE || req.status !== 200) return;
+                self.skusCache = JSON.parse(req.responseText);
+                self.menuSkus.innerHTML = "";
+                self.skusCache.forEach(function(sku) {
+                    var label = document.createElement("label");
+                    var cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.name = "skuScelti";
+                    cb.value = sku.codice;
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(" [" + sku.codice + "] " + sku.nome + " - " + sku.prezzo + "€"));
+                    self.menuSkus.appendChild(label);
+                });
+            });
+        };
+
+        // carica i prodotti disponibili come sottoprodotti
+        this.loadProdottiDisponibili = function() {
+            makeCall("GET", "GetProdottiDisponibili", null, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE || req.status !== 200) return;
+                self.prodottiCache = JSON.parse(req.responseText);
+                var menu = document.getElementById("id_menuProdottiDisponibili");
+                menu.innerHTML = "";
+                self.prodottiCache.forEach(function(prod) {
+                    var label = document.createElement("label");
+                    var cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.name = "prodottiScelti";
+                    cb.value = prod.codice;
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(" [" + prod.codice + "] " + prod.nome + " (" + prod.tipo + ")"));
+                    menu.appendChild(label);
+                });
+            });
+        };
+
+        // creazione prodotto semplice salvato subito sul db
+        document.getElementById("id_submitCreateSemplice").addEventListener('click', function(e) {
+            var form = e.target.closest("form");
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            makeCall("POST", "CreateProdottoSemplice", form, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE) return;
+                if (req.status === 200) {
+                    var prod = JSON.parse(req.responseText);
+                    self.alertContainer.textContent = "Prodotto semplice creato con successo!";
+                    self.alertContainer.style.color = "green";
+
+                    document.getElementById("id_dettaglioNuovoSemplice").style.display = "block";
+                    document.getElementById("id_sempliceCodiceDisplay").textContent = prod.codice;
+                    document.getElementById("id_sempliceNomeDisplay").textContent = prod.nome;
+                    var ul = document.getElementById("id_sempliceSkusDisplay");
+                    ul.innerHTML = "";
+                    (prod.skus || []).forEach(function(sku) {
+                        var li = document.createElement("li");
+                        li.textContent = sku.nome + " (" + sku.prezzo + "€)";
+                        ul.appendChild(li);
+                    });
+
+                    form.reset(); // svuotiamo solo se è andata a buon fine
+                    self.loadSkus();
+                    self.loadProdottiDisponibili();
+                } else {
+                    self.alertContainer.textContent = req.responseText;
+                    self.alertContainer.style.color = "red";
+                }
+            }, false); // in caso di errore non svuota la form
+        });
+
+        // creazione prodotto composto, costruisce la radice e passa all'editor 
+        document.getElementById("id_submitCreateComposto").addEventListener('click', function(e) {
+            var form = e.target.closest("form");
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            // sottoprodotti scelti: cloniamo l'albero completo preso dalla cache
+            var figli = [];
+            Array.from(document.querySelectorAll("#id_menuProdottiDisponibili input:checked")).forEach(function(cb) {
+                var prod = self.prodottiCache.find(function(p) { return p.codice === parseInt(cb.value); });
+                if (prod) figli.push(JSON.parse(JSON.stringify(prod))); // deep clone
+            });
+
+            var root = {
+                tipo: "COMPOSTO",
+                isNuovo: true,
+                codice: parseInt(form.codice.value),
+                nome: form.nome.value,
+                descrizione: form.descrizione.value,
+                prezzoMin: parseFloat(form.prezzoMin.value),
+                prezzoMax: parseFloat(form.prezzoMax.value),
+                figli: figli
+            };
+
+            // nascondi le form e mostra il costruttore dell'albero
+            document.getElementById("id_formCreaSku").closest("div").style.display = "none";
+            document.getElementById("id_formCreaSemplice").closest("div").style.display = "none";
+            form.closest("div").style.display = "none";
+            document.getElementById("id_costruttoreAlbero").style.display = "block";
+
+            self.albero.setRoot(root);
+            self.albero.update();
+        });
+
+        // salva il prodotto finale nel db e ricarica tutto
+        document.getElementById("id_btnSalvaAlberoFinale").addEventListener('click', function() {
+            self.albero.salva(function() {
+                self.hide();
+                document.getElementById("id_formCreaComposto").reset();
+                self.loadSkus();
+                self.loadProdottiDisponibili();
+            });
+        });
+    }
+
+
+    // gestore del catalogo
+    function GestoreCatalogo(containerId, formId, tableId, bodyRisultatiId, alertId) {
         this.container = document.getElementById(containerId);
         this.form = document.getElementById(formId);
         this.table = document.getElementById(tableId);
         this.bodyRisultati = document.getElementById(bodyRisultatiId);
         this.alertContainer = document.getElementById(alertId);
         this.alberoArea = document.getElementById("id_alberoRicercaArea");
-        this.alberoDisplay = document.getElementById("id_alberoRicercaDisplay");
 
-        this.alberoCorrente = null;
-        this.nodiDaEliminare = [];
-        this.relazioniDaEliminare = [];
+        // usa anche lui albero perché uguale
+        this.albero = new AlberoProdotto(document.getElementById("id_alberoRicercaDisplay"), this.alertContainer);
+
+        var self = this;
 
         this.show = function() {
             this.container.style.display = "block";
@@ -30,986 +792,173 @@
             this.alertContainer.textContent = "";
         };
 
-        var self = this;
-
-        // ricerca con keyword
+        // barra di ricerca
         this.form.querySelector("input[type='button']").addEventListener('click', function() {
-            if (self.form.checkValidity()) {
-                let keyword = self.form.keyword.value;
-                makeCall("GET", "GetRicercaProdotti?keyword=" + encodeURIComponent(keyword), null, function(req) {
-                    if (req.readyState === XMLHttpRequest.DONE) {
-                        if (req.status === 200) {
-                            var risultati = JSON.parse(req.responseText);
-                            self.bodyRisultati.innerHTML = "";
-                            self.alberoArea.style.display = "none"; 
-                            
-                            if (risultati.length === 0) {
-                                self.bodyRisultati.innerHTML = "<tr><td colspan='4' style='text-align:center;'>Nessun risultato trovato.</td></tr>";
-                            } else {
-                                risultati.forEach(r => {
-                                    let tr = document.createElement("tr");
-                                    tr.innerHTML = `
-                                        <td style="border: 1px solid #ddd; padding: 8px;">${r.codice}</td>
-                                        <td style="border: 1px solid #ddd; padding: 8px;">[${r.tipo}]</td>
-                                        <td style="border: 1px solid #ddd; padding: 8px;">${r.nome}</td>
-                                        <td style="border: 1px solid #ddd; padding: 8px; text-align:center;">
-                                            <button type="button" class="btn-vedi" data-codice="${r.codice}" data-tipo="${r.tipo}">Vedi Albero</button>
-                                        </td>`;
-                                    self.bodyRisultati.appendChild(tr);
-                                });
-
-                                // bottone per dettagli
-                                self.bodyRisultati.querySelectorAll('.btn-vedi').forEach(btn => {
-                                    btn.addEventListener('click', (e) => {
-                                        let cod = e.target.getAttribute("data-codice");
-                                        let tipo = e.target.getAttribute("data-tipo");
-                                        self.caricaAlbero(cod, tipo);
-                                    });
-                                });
-                            }
-                            self.table.style.display = "table"; 
-                        } else {
-                            self.alertContainer.textContent = "Errore durante la ricerca.";
-                            self.alertContainer.style.color = "red";
-                        }
-                    }
-                });
-            } else { self.form.reportValidity(); }
+            if (!self.form.checkValidity()) { self.form.reportValidity(); return; }
+            var keyword = self.form.keyword.value;
+            makeCall("GET", "GetRicercaProdotti?keyword=" + encodeURIComponent(keyword), null, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE) return;
+                if (req.status === 200) {
+                    self.mostraRisultati(JSON.parse(req.responseText));
+                } else {
+                    self.alertContainer.textContent = "Errore durante la ricerca.";
+                    self.alertContainer.style.color = "red";
+                }
+            });
         });
 
-        // 2. CHIAMATA ALLA NUOVA SERVLET
+		// preso il json dei risultati costruisce il testo
+        this.mostraRisultati = function(risultati) {
+            self.bodyRisultati.innerHTML = "";
+            self.alberoArea.style.display = "none";
+
+            if (risultati.length === 0) {
+                var tr = document.createElement("tr");
+                var td = document.createElement("td");
+                td.colSpan = 4;
+                td.textContent = "Nessun risultato trovato.";
+                tr.appendChild(td);
+                self.bodyRisultati.appendChild(tr);
+            } else {
+                risultati.forEach(function(r) {
+                    var tr = document.createElement("tr");
+                    [r.codice, "[" + r.tipo + "]", r.nome].forEach(function(val) {
+                        var td = document.createElement("td");
+                        td.textContent = val;
+                        tr.appendChild(td);
+                    });
+                    var tdBtn = document.createElement("td");
+                    var btn = document.createElement("button");
+                    btn.textContent = "Vedi / Modifica";
+                    btn.addEventListener("click", function() { self.caricaAlbero(r.codice, r.tipo); });
+                    tdBtn.appendChild(btn);
+                    tr.appendChild(tdBtn);
+                    self.bodyRisultati.appendChild(tr);
+                });
+            }
+            self.table.style.display = "table";
+        };
+
+        // carica e mostra l'oggetto cliccato
         this.caricaAlbero = function(codice, tipo) {
-            makeCall("GET", "GetAlberoProdotto?codice=" + codice + "&tipo=" + tipo, null, function(req) {
-                if (req.readyState === XMLHttpRequest.DONE && req.status === 200) {
-                    self.alberoCorrente = JSON.parse(req.responseText);
-                    self.nodiDaEliminare = [];
-                    self.relazioniDaEliminare = [];
-                    self.disegnaAlberoVisivo();
-                    self.alberoArea.style.display = "block"; // Mostra l'area
+            makeCall("GET", "GetAlberoProdotto?codice=" + encodeURIComponent(codice) + "&tipo=" + encodeURIComponent(tipo), null, function(req) {
+                if (req.readyState !== XMLHttpRequest.DONE || req.status !== 200) return;
+                var root = JSON.parse(req.responseText);
+                self.alberoArea.style.display = "block";
+
+                if (root.tipo === "SKU") {
+                    self.mostraSkuSingola(root); // SKU foglia: card con salvataggio immediato
+                } else {
+                    document.getElementById("id_btnSalvaModificheRicerca").style.display = "block";
+                    self.albero.setRoot(root);
+                    self.albero.update();
                 }
             });
         };
 
-        // disegna l'albero
-        this.disegnaAlberoVisivo = function() {
-            this.alberoDisplay.innerHTML = "";
-            if (!this.alberoCorrente) return;
-            this.renderNodo(this.alberoCorrente, this.alberoDisplay, 1, null, -1);
+        // sku singola si modifica con salvataggio immediato più ELIMINA
+        this.mostraSkuSingola = function(sku) {
+            document.getElementById("id_btnSalvaModificheRicerca").style.display = "none";
+            var disp = self.albero.display;
+            disp.innerHTML = "";
+
+            var titolo = document.createElement("p");
+            titolo.innerHTML = "<strong>[SKU] " + sku.codice + "</strong> — le modifiche si salvano automaticamente";
+            disp.appendChild(titolo);
+
+            var riga = document.createElement("div");
+            riga.appendChild(document.createTextNode("Nome: "));
+            riga.appendChild(campoSkuAutosave(sku.codice, "nome", sku.nome, false));
+            riga.appendChild(document.createTextNode(" | Prezzo: "));
+            riga.appendChild(campoSkuAutosave(sku.codice, "prezzo", sku.prezzo, true));
+            riga.appendChild(document.createTextNode(" | Foto: "));
+            riga.appendChild(campoSkuAutosave(sku.codice, "foto", sku.foto, false));
+            riga.appendChild(document.createTextNode(" | Desc: "));
+            riga.appendChild(campoSkuAutosave(sku.codice, "descrizione", sku.descrizione, false));
+            disp.appendChild(riga);
+
+            var btnElim = document.createElement("button");
+            btnElim.textContent = "ELIMINA SKU dal catalogo";
+            btnElim.className = "btn-elimina";
+            btnElim.addEventListener("click", function() {
+                if (!confirm("Eliminare definitivamente questa SKU dalla base di dati?")) return;
+                var fd = new FormData();
+                fd.append("daEliminareJSON", JSON.stringify([{ tipo: "SKU", codice: sku.codice }]));
+                makeCall("POST", "SaveAlberoComposto", fd, function(req) {
+                    if (req.readyState !== XMLHttpRequest.DONE) return;
+                    if (req.status === 200) {
+                        self.alertContainer.textContent = "SKU eliminata.";
+                        self.alertContainer.style.color = "green";
+                        self.alberoArea.style.display = "none";
+                    } else {
+                        self.alertContainer.textContent = "Errore: " + req.responseText;
+                        self.alertContainer.style.color = "red";
+                    }
+                });
+            });
+            disp.appendChild(btnElim);
         };
 
-        this.renderNodo = function(nodo, container, livello, nodoPadre, indiceNelPadre) {
-            var nodoDiv = document.createElement("div");
-            nodoDiv.style.marginLeft = (livello === 1) ? "0px" : "30px";
-            nodoDiv.style.borderLeft = (livello === 1) ? "none" : "2px dashed #4CAF50";
-            nodoDiv.style.padding = "5px 10px";
-            nodoDiv.style.marginTop = "5px";
-
-            var rigaTop = document.createElement("div");
-            rigaTop.style.marginBottom = "5px";
-            var strongCodice = document.createElement("strong");
-            strongCodice.textContent = `[${nodo.tipo}] ${nodo.codice} - `;
-            rigaTop.appendChild(strongCodice);
-
-            // inline editing
-            const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
-                let span = document.createElement("span");
-                span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
-                span.style.color = "#4CAF50";
-                span.style.cursor = "pointer";
-                span.style.fontWeight = "bold";
-
-                span.onclick = function() {
-                    if (this.querySelector('input')) return; 
-                    var vecchioValore = oggetto[proprietà];
-                    this.textContent = '';
-                    var input = document.createElement('input');
-                    input.type = tipoInput;
-                    input.value = vecchioValore;
-                    if (tipoInput === 'number') input.style.width = "70px"; 
-                    
-                    this.appendChild(input);
-                    input.focus();
-
-                    input.addEventListener('mouseleave', () => {
-                        var nuovoValore = input.value.trim();
-                        if (nuovoValore === "" || (tipoInput === 'number' && parseFloat(nuovoValore) < 0)) {
-                            oggetto[proprietà] = vecchioValore;
-                        } else {
-                            oggetto[proprietà] = (tipoInput === 'number') ? parseFloat(nuovoValore) : nuovoValore;
-                        }
-                        self.disegnaAlberoVisivo(); 
-                    });
-                };
-                return span;
-            };
-
-            // campi modificabili in base al tipo
-            rigaTop.appendChild(document.createTextNode("Nome: "));
-            rigaTop.appendChild(creaCampoEditabile(nodo, 'nome', 'text'));
-
-            if (nodo.tipo === "COMPOSTO") {
-                rigaTop.appendChild(document.createTextNode(" | Desc: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'descrizione', 'text'));
-                rigaTop.appendChild(document.createTextNode(" | P.Min: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMin', 'number'));
-                rigaTop.appendChild(document.createTextNode(" | P.Max: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMax', 'number'));
-            }
-
-            // tasti - e -*
-            var btnContainer = document.createElement("span");
-            btnContainer.style.marginLeft = "15px";
-
-            if (livello > 1) { // non puoi eliminare la radice
-                var btnRemoveRel = document.createElement("button");
-                btnRemoveRel.textContent = "-";
-                btnRemoveRel.style.marginLeft = "5px";
-                btnRemoveRel.title = "Rimuovi legame";
-                btnRemoveRel.onclick = () => {
-                    self.relazioniDaEliminare.push({ tipoRel: "COMPOSIZIONE", padre: nodoPadre.codice, figlio: nodo.codice });
-                    nodoPadre.figli.splice(indiceNelPadre, 1);
-                    self.disegnaAlberoVisivo();
-                };
-                btnContainer.appendChild(btnRemoveRel);
-
-                var btnDelete = document.createElement("button");
-                btnDelete.textContent = "-*";
-                btnDelete.style.marginLeft = "5px";
-                btnDelete.title = "Rimuovi intero prodotto";
-                btnDelete.onclick = () => {
-                    self.nodiDaEliminare.push({ tipo: nodo.tipo, codice: nodo.codice });
-                    nodoPadre.figli.splice(indiceNelPadre, 1);
-                    self.disegnaAlberoVisivo();
-                };
-                btnContainer.appendChild(btnDelete);
-            }
-            rigaTop.appendChild(btnContainer);
-            nodoDiv.appendChild(rigaTop);
-
-            // ricorsione nodi figli
-            if (nodo.tipo === "COMPOSTO" && nodo.figli) {
-                nodo.figli.forEach((figlio, idx) => {
-                    self.renderNodo(figlio, nodoDiv, livello + 1, nodo, idx);
-                });
-            }
-
-            // sku per i semplici
-            if (nodo.tipo === "SEMPLICE" && nodo.skus) {
-                var ulSkus = document.createElement("ul");
-                ulSkus.style.margin = "5px 0 10px 20px";
-                ulSkus.style.fontSize = "13px";
-                
-                nodo.skus.forEach((skuObj, idx) => {
-                    let li = document.createElement("li");
-                    li.style.marginBottom = "3px";
-                    
-                    let strongCodice = document.createElement("strong");
-                    strongCodice.innerHTML = `[${skuObj.codice}] - Nome: `;
-                    li.appendChild(strongCodice);
-
-                    li.appendChild(creaCampoEditabile(skuObj, 'nome', 'text'));
-                    li.appendChild(document.createTextNode(" | P: "));
-                    li.appendChild(creaCampoEditabile(skuObj, 'prezzo', 'number'));
-                    li.appendChild(document.createTextNode(" | Desc: "));
-                    li.appendChild(creaCampoEditabile(skuObj, 'descrizione', 'text'));
-
-                    let btnMinus = document.createElement("button");
-                    btnMinus.textContent = "-";
-                    btnMinus.style.marginLeft = "5px";
-                    btnMinus.onclick = () => { 
-                        if (nodo.skus.length <= 1) { alert("Un prodotto semplice deve avere almeno una SKU"); return; }
-                        self.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: skuObj.codice });
-                        nodo.skus.splice(idx, 1);
-                        self.disegnaAlberoVisivo();
-                    };
-                    li.appendChild(btnMinus);
-
-                    let btnStar = document.createElement("button");
-                    btnStar.textContent = "-*";
-                    btnStar.style.marginLeft = "5px";
-                    btnStar.onclick = () => { 
-                        if (nodo.skus.length <= 1) { alert("Azione negata: questa è l'unica SKU del prodotto"); return; }
-                        self.nodiDaEliminare.push({ tipo: "SKU", codice: skuObj.codice });
-                        nodo.skus.splice(idx, 1);
-                        self.disegnaAlberoVisivo();
-                    };
-                    li.appendChild(btnStar);
-
-                    ulSkus.appendChild(li);
-                });
-                nodoDiv.appendChild(ulSkus);
-            }
-            container.appendChild(nodoDiv);
-        };
+        // salva modifiche al catalogo 
+        document.getElementById("id_btnSalvaModificheRicerca").addEventListener('click', function() {
+            self.albero.salva(function() {
+                self.alberoArea.style.display = "none";
+            });
+        });
     }
 
 
-
-    // teniamo un gestore per tutte le form di creazione
-	function GestoreCreazione(containerId, alertId) {
-        this.container = document.getElementById(containerId);
-        this.alertContainer = document.getElementById(alertId);
-		this.menuSkus = document.getElementById("id_menuSkus");
-		
-		// variabile per tenere in memoria l'albero del prod composto
-		this.alberoCorrente = null;
-		this.skusCache = [];
-		this.prodottiCache = [];
-		this.nodiDaEliminare = [];
-		this.relazioniDaEliminare = [];
-
-        this.show = function() {
-			this.container.style.display = "flex"; 
-			            
-            // rimettiamo le form
-            document.getElementById("id_formCreaSku").closest("div").style.display = "block";
-            document.getElementById("id_formCreaSemplice").closest("div").style.display = "block";
-            document.getElementById("id_formCreaComposto").closest("div").style.display = "block";
-            
-            // togliamo i dettagli 
-            document.getElementById("id_costruttoreAlbero").style.display = "none";
-            document.getElementById("id_dettaglioNuovaSku").style.display = "none";
-            document.getElementById("id_dettaglioNuovoSemplice").style.display = "none";
-            
-            this.loadSkus();
-			this.loadProdottiDisponibili();
-        };
-
-        this.hide = function() {
-            this.container.style.display = "none";
-			document.getElementById("id_costruttoreAlbero").style.display = "none";
-        };
-
-        // evento di creazione sku
-		document.getElementById("id_submitCreateSku").addEventListener('click', (e) => {
-            var form = e.target.closest("form");
-            
-            if (form.checkValidity()) {
-                var self = this; 
-                
-                makeCall("POST", "CreateSku", form, function(req) {
-                    if (req.readyState === XMLHttpRequest.DONE) {
-                        if (req.status === 200) {
-                            // parsing json
-                            var skuCreata = JSON.parse(req.responseText);
-                            
-                            // successo
-                            self.alertContainer.textContent = "SKU " + skuCreata.nome + " creata.";
-                            self.alertContainer.style.color = "green";
-                            
-                            // mostriamo i dati della sku
-                            document.getElementById("id_dettaglioNuovaSku").style.display = "block";
-                            document.getElementById("id_skuCodiceDisplay").textContent = skuCreata.codice;
-                            document.getElementById("id_skuNomeDisplay").textContent = skuCreata.nome;
-                            document.getElementById("id_skuFotoDisplay").textContent = skuCreata.foto;
-                            document.getElementById("id_skuDescrizioneDisplay").textContent = skuCreata.descrizione;
-						    document.getElementById("id_skuPrezzoDisplay").textContent = skuCreata.prezzo;
-
-                            // attiviamo l'inline editing
-                            attivaInlineEditing(skuCreata.codice);
-							
-							form.reset();
-							self.loadSkus();
-
-                        } else {
-                            self.alertContainer.textContent = req.responseText;
-                            self.alertContainer.style.color = "red";
-                        }
-                    }
-                });
-            } else {
-                form.reportValidity();
-            }
-        });
-
-
-        // inline editing per sku
-        function attivaInlineEditing(codiceSku) {
-            // prendiamo tutti gli span con la classe editable
-            var campi = document.querySelectorAll("#id_dettaglioNuovaSku .editable");
-            
-            campi.forEach(function(spanElement) {
-                // cloniamo lo span per rimuovere eventuali listener precedenti e evitare conflitti
-                var nuovoSpan = spanElement.cloneNode(true);
-                spanElement.parentNode.replaceChild(nuovoSpan, spanElement);
-
-                nuovoSpan.addEventListener('click', function() {
-                    // Se c'è già un input dentro, non fare nulla
-                    if (this.querySelector('input')) return;
-
-                    var nomeCampo = this.getAttribute('data-campo');
-                    var valoreVecchio = this.textContent; // salviamo il vecchio valore per eventuale rollback
-
-                    // svuotiamo lo span e ci mettiamo dentro un input
-                    this.textContent = '';
-                    var inputElement = document.createElement('input');
-                    inputElement.type = (nomeCampo === 'prezzo') ? 'number' : 'text';
-                    inputElement.value = valoreVecchio;
-                    
-                    this.appendChild(inputElement);
-                    inputElement.focus(); // focus sull'input per comodità
-
-                    // evento mouseleave
-                    inputElement.addEventListener('mouseleave', function() {
-                        var valoreNuovo = inputElement.value.trim();
-
-                        // se non ci sono modifiche non facciamo niente
-                        if (valoreNuovo === valoreVecchio) {
-                            nuovoSpan.textContent = valoreVecchio;
-                            return;
-                        }
-
-                        // impediamo valori sbagliati
-                        if (valoreNuovo === "" || (nomeCampo === 'prezzo' && parseFloat(valoreNuovo) <= 0)) {
-                            nuovoSpan.textContent = valoreVecchio; // ripristino
-                            alert("Valore inserito non valido. Modifica annullata.");
-                            return;
-                        }
-
-                        // altrimenti salviamo
-                        var formData = new FormData();
-                        formData.append("codice", codiceSku);
-                        formData.append("campo", nomeCampo);
-                        formData.append("valore", valoreNuovo);
-
-                        // makecall asincrona
-                        makeCall("POST", "UpdateSkuInline", formData, function(req) {
-                            if (req.readyState === XMLHttpRequest.DONE) {
-                                if (req.status === 200) {
-                                    // ok
-                                    nuovoSpan.textContent = valoreNuovo;
-                                    nuovoSpan.style.color = "blue";
-                                    setTimeout(() => nuovoSpan.style.color = "", 3000);
-								    self.loadSkus();
-                                } else {
-                                    // rollback
-                                    nuovoSpan.textContent = valoreVecchio;
-                                    alert("Errore di rete: " + req.responseText + ". Ripristino valore originale.");
-                                }
-                            }
-                        }, false);
-                    });
-                });
-            });
-        }
-		
-		// carichiamo le sku per il menu a tendina dei prod semplici
-		this.loadSkus = function() {
-            var self = this;
-            makeCall("GET", "GetSkus", null, function(req) {
-                if (req.readyState === XMLHttpRequest.DONE && req.status === 200) {
-                    var listaSkus = JSON.parse(req.responseText);
-					self.skusCache = listaSkus;
-                    self.menuSkus.innerHTML = ""; // svuotiamo 
-                    
-                    listaSkus.forEach(function(sku) {
-                        // facciamo un label per sku
-                        var label = document.createElement("label");
-                        label.style.display = "block";
-                        label.style.cursor = "pointer";
-                        label.style.marginBottom = "5px";
-
-                        // creiamo la checkbox
-                        var checkbox = document.createElement("input");
-                        checkbox.type = "checkbox";
-                        checkbox.name = "skuScelti";
-                        checkbox.value = sku.codice;
-                        
-                        // <label><input type="checkbox"> [Codice] Nome</label>
-                        label.appendChild(checkbox);
-                        label.appendChild(document.createTextNode(" [" + sku.codice + "] " + sku.nome + " - " + sku.prezzo + "€"));
-                        
-                        // aggiungiamo la riga al div
-                        self.menuSkus.appendChild(label);
-                    });
-                }
-            });
-        };
-		
-		this.loadProdottiDisponibili = function() {
-            var self = this;
-            makeCall("GET", "GetProdottiDisponibili", null, function(req) {
-                if (req.readyState === XMLHttpRequest.DONE && req.status === 200) {
-                    var listaProdotti = JSON.parse(req.responseText);
-                    self.prodottiCache = listaProdotti; 
-                    
-                    var menuProdotti = document.getElementById("id_menuProdottiDisponibili");
-                    menuProdotti.innerHTML = ""; 
-                    
-                    listaProdotti.forEach(function(prod) {
-                        var label = document.createElement("label");
-                        label.style.display = "block"; 
-                        label.style.cursor = "pointer"; 
-                        
-                        var checkbox = document.createElement("input");
-                        checkbox.type = "checkbox";
-                        checkbox.name = "prodottiScelti"; 
-                        checkbox.value = prod.codice;
-                        checkbox.dataset.tipo = prod.tipo; // SALVIAMO IL TIPO SULLA CHECKBOX!
-                        
-                        label.appendChild(checkbox);
-                        label.appendChild(document.createTextNode(` [${prod.codice}] ${prod.nome} (${prod.tipo})`));
-                        menuProdotti.appendChild(label);
-                    });
-                }
-            });
-        };
-
-        // creazione prodotto semplice
-		document.getElementById("id_submitCreateSemplice").addEventListener('click', (e) => {
-	        var form = e.target.closest("form");
-	        if (form.checkValidity()) {
-	            var self = this;
-	            
-	            makeCall("POST", "CreateProdottoSemplice", form, function(req) {
-	                if (req.readyState === XMLHttpRequest.DONE) {
-	                    if (req.status === 200) {
-	                        var prodSemplice = JSON.parse(req.responseText);
-	                        
-	                        self.alertContainer.textContent = "Prodotto Semplice creato con successo!";
-	                        self.alertContainer.style.color = "green";
-	                        
-	                        // mostriamo lo schermo aggiornato
-	                        document.getElementById("id_dettaglioNuovoSemplice").style.display = "block";
-	                        document.getElementById("id_sempliceCodiceDisplay").textContent = prodSemplice.codice;
-	                        document.getElementById("id_sempliceNomeDisplay").textContent = prodSemplice.nome;
-	                        
-	                        // mettiamo la lista delle sku collegate
-	                        var ulSkus = document.getElementById("id_sempliceSkusDisplay");
-	                        ulSkus.innerHTML = "";
-	                        prodSemplice.skus.forEach(function(sku) {
-	                            var li = document.createElement("li");
-	                            li.textContent = sku.nome + " (" + sku.prezzo + "€)";
-	                            ulSkus.appendChild(li);
-	                        });
-	
-	                        // ricarichiamo le SKU nella tendina
-	                        self.loadSkus(); 
-							
-							form.reset();
-							self.loadProdottiDisponibili();
-	                    } else {
-	                        self.alertContainer.textContent = req.responseText;
-	                        self.alertContainer.style.color = "red";
-	                    }
-	                }
-	            });
-	        } else {
-	            form.reportValidity();
-	        }
-	    });
-	
-	    // creazione prodotto composto
-		document.getElementById("id_submitCreateComposto").addEventListener('click', (e) => {
-            var form = e.target.closest("form");
-            if (form.checkValidity()) {
-                let selectedProdotti = Array.from(document.querySelectorAll("input[name='prodottiScelti']:checked"));
-                let figliIniziali = [];
-                
-				selectedProdotti.forEach(cb => {
-                    let prodDati = this.prodottiCache.find(p => p.codice === parseInt(cb.value));
-                    if(prodDati) {
-                        // LA MAGIA: Cloniamo profondamente l'intero albero prelevato dal DB!
-                        // Così possiamo modificarlo, eliminare i suoi figli ecc. senza corrompere la cache originale.
-                        let cloneAlbero = JSON.parse(JSON.stringify(prodDati));
-                        figliIniziali.push(cloneAlbero);
-                    }
-                });
-
-                this.alberoCorrente = {
-                    tipo: "COMPOSTO",
-                    isNuovo: true, // la radice è sempre nuova
-                    codice: form.codice.value,
-                    nome: form.nome.value,
-                    prezzoMin: parseFloat(form.prezzoMin.value),
-                    prezzoMax: parseFloat(form.prezzoMax.value),
-                    descrizione: form.descrizione.value,
-                    figli: figliIniziali
-                };
-
-                // nascondi form e mostra albero come prima
-                document.getElementById("id_formCreaSku").closest("div").style.display = "none";
-                document.getElementById("id_formCreaSemplice").closest("div").style.display = "none";
-                form.closest("div").style.display = "none";
-                document.getElementById("id_costruttoreAlbero").style.display = "block";
-                
-                this.nodiDaEliminare = []; // resetta la lista ad ogni nuova creazione
-				this.relazioniDaEliminare = [];
-                this.disegnaAlberoVisivo();
-            } else { form.reportValidity(); }
-        });
-
-
-        // disegna l'albero 
-        this.disegnaAlberoVisivo = function() {
-            var container = document.getElementById("id_alberoDisplay");
-            container.innerHTML = ""; // puliamo 
-            if (!this.alberoCorrente) return;
-            
-            // facciamo partire la ricorsione partendo dal nodo radice
-            this.renderNodo(this.alberoCorrente, container, 1, null, -1);
-        };
-
-        // modo ricorsivo che disegna nodo e richiama sè stesso sui figli
-		this.renderNodo = function(nodo, container, livello, nodoPadre, indiceNelPadre) {
-            var nodoDiv = document.createElement("div");
-            nodoDiv.style.marginLeft = (livello === 1) ? "0px" : "30px"; 
-            nodoDiv.style.borderLeft = (livello === 1) ? "none" : "2px dashed #ccc";
-            nodoDiv.style.padding = "5px 10px";
-            nodoDiv.style.marginTop = "5px";
-
-			var rigaTop = document.createElement("div");
-            rigaTop.style.marginBottom = "5px";
-            nodoDiv.appendChild(rigaTop);
-
-            var strongCodice = document.createElement("strong");
-            strongCodice.textContent = `[${nodo.tipo}] ${nodo.codice} - `;
-            rigaTop.appendChild(strongCodice);
-
-            var self = this;
-
-            // crea un testo blu cliccabile che diventa un input
-            const creaCampoEditabile = (oggetto, proprietà, tipoInput) => {
-                let span = document.createElement("span");
-                span.textContent = oggetto[proprietà] !== undefined ? oggetto[proprietà] : "";
-                span.style.color = "#2196F3"; // colore blu per indicare che è cliccabile
-                span.style.cursor = "pointer";
-                span.style.fontWeight = "bold";
-
-                span.onclick = function() {
-                    if (this.querySelector('input')) return; // evita doppi click
-                    var vecchioValore = oggetto[proprietà];
-                    
-                    this.textContent = '';
-                    var input = document.createElement('input');
-                    input.type = tipoInput;
-                    input.value = vecchioValore;
-                    if (tipoInput === 'number') input.style.width = "70px"; 
-                    
-                    this.appendChild(input);
-                    input.focus();
-
-                    // Quando sposti il mouse salva nell'oggetto Javascript locale
-                    input.addEventListener('mouseleave', () => {
-                        var nuovoValore = input.value.trim();
-                        if (nuovoValore === "" || (tipoInput === 'number' && parseFloat(nuovoValore) < 0)) {
-                            oggetto[proprietà] = vecchioValore; // valore non valido, annulla
-                        } else {
-                            oggetto[proprietà] = (tipoInput === 'number') ? parseFloat(nuovoValore) : nuovoValore;
-                        }
-                        self.disegnaAlberoVisivo(); // Ridisegna l'albero per mostrare la modifica
-                    });
-                };
-                return span;
-            };
-
-            // AGGIUNGIAMO I CAMPI IN BASE AL TIPO DI PRODOTTO
-            rigaTop.appendChild(document.createTextNode("Nome: "));
-            rigaTop.appendChild(creaCampoEditabile(nodo, 'nome', 'text'));
-
-            if (nodo.tipo === "COMPOSTO") {
-                rigaTop.appendChild(document.createTextNode(" | Desc: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'descrizione', 'text'));
-                rigaTop.appendChild(document.createTextNode(" | P.Min: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMin', 'number'));
-                rigaTop.appendChild(document.createTextNode(" | P.Max: "));
-                rigaTop.appendChild(creaCampoEditabile(nodo, 'prezzoMax', 'number'));
-            }
-
-            var btnContainer = document.createElement("span");
-            btnContainer.style.marginLeft = "15px";
-
-            // bottone + per i composti max liv 4 e per i semplici per aggiungere le SKU
-            if ((nodo.tipo === "COMPOSTO" && livello < 4) || nodo.tipo === "SEMPLICE") {
-                var btnAdd = document.createElement("button");
-                btnAdd.textContent = "+";
-                btnAdd.style.cursor = "pointer";
-                btnAdd.onclick = () => this.mostraMenuAggiunta(nodo, formArea);
-                btnContainer.appendChild(btnAdd);
-            }
-            
-            // i bottoni - e -* appaiono solo dai figli in giù
-            if (livello > 1) {
-                var btnRemoveRel = document.createElement("button");
-                btnRemoveRel.textContent = "-";
-                btnRemoveRel.style.marginLeft = "5px";
-                btnRemoveRel.onclick = () => {
-					var nodoDaRimuovere = nodoPadre.figli[indiceNelPadre];
-                    // Se non è nuovo, diciamo al DB di spezzare il legame!
-                    if (nodoDaRimuovere.isNuovo === false) {
-                        this.relazioniDaEliminare.push({ tipoRel: "COMPOSIZIONE", padre: nodoPadre.codice, figlio: nodoDaRimuovere.codice });
-                    }
-                    nodoPadre.figli.splice(indiceNelPadre, 1); // rimuove dalla memoria
-                    this.disegnaAlberoVisivo(); // ridisegna 
-                };
-                btnContainer.appendChild(btnRemoveRel);
-
-				var btnDelete = document.createElement("button");
-                btnDelete.textContent = "-*";
-                btnDelete.style.marginLeft = "5px";
-                btnDelete.onclick = () => {
-                    var nodoDaRimuovere = nodoPadre.figli[indiceNelPadre];
-                    // se non è nuovo mettiamo in lista di eliminazione
-                    if (nodoDaRimuovere.isNuovo === false) {
-                        this.nodiDaEliminare.push({ tipo: nodoDaRimuovere.tipo, codice: nodoDaRimuovere.codice });
-                    }
-                    nodoPadre.figli.splice(indiceNelPadre, 1);
-                    this.disegnaAlberoVisivo();
-                };
-                btnContainer.appendChild(btnDelete);
-            }
-            rigaTop.appendChild(btnContainer);
-
-            var formArea = document.createElement("div");
-            formArea.style.display = "none";
-            formArea.style.border = "1px solid #FF9800";
-            formArea.style.padding = "10px";
-            formArea.style.marginTop = "5px";
-            formArea.style.backgroundColor = "#fff";
-            nodoDiv.appendChild(formArea);
-
-            // ricorsione sui figli dei composti
-            if (nodo.tipo === "COMPOSTO" && nodo.figli) {
-                nodo.figli.forEach((figlio, idx) => {
-                    this.renderNodo(figlio, nodoDiv, livello + 1, nodo, idx);
-                });
-            }
-
-            // visualizzazione delle sku per i semplici
-            if (nodo.tipo === "SEMPLICE") {
-                var ulSkus = document.createElement("ul");
-                ulSkus.style.margin = "5px 0 10px 20px";
-                ulSkus.style.fontSize = "13px";
-                
-                // Funzione di sicurezza condivisa per l'eliminazione
-                const tentaEliminazioneSku = (arrayDiAppartenenza, indice) => {
-                    let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
-                    if (totaleSkus <= 1) {
-                        alert("Azione negata: Un prodotto semplice deve avere almeno una SKU associata");
-                        return;
-                    }
-                    arrayDiAppartenenza.splice(indice, 1);
-                    this.disegnaAlberoVisivo();
-                };
-
-                // Disegna SKU esistenti
-				if (nodo.skus) {
-                    nodo.skus.forEach((codiceSku, idx) => {
-                        let skuDati = this.skusCache.find(x => x.codice == codiceSku);
-                        let nomeMostrato = skuDati ? skuDati.nome : "SKU " + codiceSku;
-                        let li = document.createElement("li");
-                        
-                        // ORA ABBIAMO ENTRAMBI I BOTTONI (- e *)
-                        li.innerHTML = `[${codiceSku}] ${nomeMostrato} (Esistente) 
-                                        <button class="btn-minus" style="margin-left:5px;" title="Rimuovi legame">-</button>
-                                        <button class="btn-star" style="margin-left:5px;" title="Elimina dal DB">*</button>`;
-                        
-                        // TASTO MENO: Spezza il legame
-                        li.querySelector(".btn-minus").onclick = () => { 
-                            this.relazioniDaEliminare.push({ tipoRel: "REALIZZAZIONE", padre: nodo.codice, figlio: codiceSku });
-                            tentaEliminazioneSku(nodo.skus, idx); 
-                        };
-
-                        // TASTO STELLA: Cancella dal DB!
-                        li.querySelector(".btn-star").onclick = () => { 
-                            // Controllo frontend preventivo: non ti faccio nemmeno cliccare se è l'ultima!
-                            let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
-                            if (totaleSkus <= 1) {
-                                alert("Azione negata: Questa è l'unica SKU in questa schermata. Se la elimini dal DB il prodotto semplice rimarrà vuoto!");
-                                return;
-                            }
-                            this.nodiDaEliminare.push({ tipo: "SKU", codice: codiceSku });
-                            tentaEliminazioneSku(nodo.skus, idx); 
-                        };
-                        ulSkus.appendChild(li);
-                    });
-                };
-                
-                // Disegna Nuove SKU
-                if (nodo.nuoveSkus) {
-                    nodo.nuoveSkus.forEach((skuObj, idx) => {
-                        let li = document.createElement("li");
-                        li.innerHTML = `[${skuObj.codice}] ${skuObj.nome} - ${skuObj.prezzo}€ <strong style="color:green;">(NUOVA)</strong> <button style="margin-left:5px;">-</button>`;
-                        li.querySelector("button").onclick = () => tentaEliminazioneSku(nodo.nuoveSkus, idx);
-                        ulSkus.appendChild(li);
-                    });
-                }
-                nodoDiv.appendChild(ulSkus);
-            }
-
-            container.appendChild(nodoDiv);
-        };
-
-        // 3. Il menu di aggiunta
-        this.mostraMenuAggiunta = function(nodoPadre, formArea) {
-            formArea.style.display = "block";
-            var self = this;
-
-            if (nodoPadre.tipo === "COMPOSTO") {
-                // logica del composto
-                formArea.innerHTML = `
-                    <p style="margin: 0 0 5px 0;"><strong>Aggiungi figlio a: ${nodoPadre.nome}</strong></p>
-                    <button id="btnSceltaComposto">Sottoprodotto Composto</button>
-                    <button id="btnSceltaSemplice">Sottoprodotto Semplice</button>
-                    <button onclick="this.parentNode.style.display='none'">Annulla</button>
-                    <div id="divDettagliAggiunta" style="margin-top: 10px;"></div>
-                `;
-                var areaDettagli = formArea.querySelector("#divDettagliAggiunta");
-
-                formArea.querySelector("#btnSceltaComposto").onclick = () => {
-                    areaDettagli.innerHTML = `
-                        <input type="text" id="tmp_codice" placeholder="Codice" size="5" required>
-                        <input type="text" id="tmp_nome" placeholder="Nome" required>
-                        <input type="number" id="tmp_pmin" placeholder="P.Min" size="5">
-                        <input type="number" id="tmp_pmax" placeholder="P.Max" size="5">
-                        <button id="btnConfermaComposto" style="background:green; color:white;">OK</button>
-                    `;
-                    areaDettagli.querySelector("#btnConfermaComposto").onclick = () => {
-                        nodoPadre.figli.push({
-                            tipo: "COMPOSTO",
-                            codice: areaDettagli.querySelector("#tmp_codice").value,
-                            nome: areaDettagli.querySelector("#tmp_nome").value,
-                            prezzoMin: parseFloat(areaDettagli.querySelector("#tmp_pmin").value || 0),
-                            prezzoMax: parseFloat(areaDettagli.querySelector("#tmp_pmax").value || 0),
-                            figli: []
-                        });
-                        self.disegnaAlberoVisivo();
-                    };
-                };
-
-				formArea.querySelector("#btnSceltaSemplice").onclick = () => {
-                    // Creiamo le checkbox prendendole dalla cache!
-                    let checkboxesHTML = self.skusCache.map(sku => 
-                        `<label style="display:block;"><input type="checkbox" name="tmp_sku_nuovosemplice" value="${sku.codice}"> [${sku.codice}] ${sku.nome}</label>`
-                    ).join("");
-
-                    areaDettagli.innerHTML = `
-                        <input type="text" id="tmp_codice_s" placeholder="Codice" size="5" required>
-                        <input type="text" id="tmp_nome_s" placeholder="Nome" required>
-                        <p style="margin: 5px 0 2px 0; font-size: 12px;">Associa SKU:</p>
-                        <div style="height:80px; overflow-y:auto; border:1px solid #ccc; margin-bottom:5px; padding:3px; font-size:12px;">
-                            ${checkboxesHTML}
-                        </div>
-                        <button id="btnConfermaSemplice" style="background:green; color:white;">OK</button>
-                    `;
-                    areaDettagli.querySelector("#btnConfermaSemplice").onclick = () => {
-                        // Leggiamo le SKU spuntate
-                        let selectedSkus = Array.from(areaDettagli.querySelectorAll("input[name='tmp_sku_nuovosemplice']:checked")).map(cb => parseInt(cb.value));
-                        if(selectedSkus.length === 0) {
-                            alert("Devi selezionare almeno una SKU per il prodotto semplice!");
-                            return;
-                        }
-
-                        nodoPadre.figli.push({
-                            tipo: "SEMPLICE",
-                            isNuovo: true,
-                            codice: areaDettagli.querySelector("#tmp_codice_s").value,
-                            nome: areaDettagli.querySelector("#tmp_nome_s").value,
-                            skus: selectedSkus, // Le inseriamo subito!
-                            nuoveSkus: []
-                        });
-                        self.disegnaAlberoVisivo();
-                    };
-                };
-
-            } else if (nodoPadre.tipo === "SEMPLICE") {
-                // se nodo padre è semplice facciamo scegliere se sku nuova o esistente
-                formArea.innerHTML = `
-                    <p style="margin: 0 0 5px 0;"><strong>Aggiungi SKU a: ${nodoPadre.nome}</strong></p>
-                    <button id="btnSceltaNuovaSku">Nuova SKU</button>
-                    <button id="btnSceltaSkuEsistente">SKU Esistente</button>
-                    <button onclick="this.parentNode.style.display='none'">Annulla</button>
-                    <div id="divDettagliAggiunta" style="margin-top: 10px;"></div>
-                `;
-                var areaDettagli = formArea.querySelector("#divDettagliAggiunta");
-
-                // sku esistente dalla cache NASCONDE QUELLE GIA' PRESENTI)
-                formArea.querySelector("#btnSceltaSkuEsistente").onclick = () => {
-                    // FILTRO: Prendi dalla cache solo le sku che NON sono in nodoPadre.skus
-                    let skuDisponibili = self.skusCache.filter(sku => !nodoPadre.skus.includes(sku.codice));
-
-                    if (skuDisponibili.length === 0) {
-                        areaDettagli.innerHTML = `<p style="color:red;">Tutte le SKU disponibili sono già associate a questo prodotto!</p>`;
-                        return;
-                    }
-
-                    let checkboxesHTML = skuDisponibili.map(sku => 
-                        `<label style="display:block;"><input type="checkbox" name="tmp_sku_add" value="${sku.codice}"> [${sku.codice}] ${sku.nome}</label>`
-                    ).join("");
-
-                    areaDettagli.innerHTML = `
-                        <div style="height:80px; overflow-y:auto; border:1px solid #ccc; margin:5px 0; padding:3px;">
-                            ${checkboxesHTML}
-                        </div>
-                        <button id="btnConfermaEsistente" style="background:green; color:white;">Aggiungi Selezionate</button>
-                    `;
-                    areaDettagli.querySelector("#btnConfermaEsistente").onclick = () => {
-                        let selectedSkus = Array.from(areaDettagli.querySelectorAll("input[name='tmp_sku_add']:checked")).map(cb => parseInt(cb.value));
-                        if(selectedSkus.length === 0) return;
-                        
-                        selectedSkus.forEach(s => { 
-                            if(!nodoPadre.skus.includes(s)) nodoPadre.skus.push(s); 
-                        });
-                        self.disegnaAlberoVisivo();
-                    };
-                };
-
-                // Nuova SKU (Controllo duplicati prima di crearla!)
-                formArea.querySelector("#btnSceltaNuovaSku").onclick = () => {
-                    areaDettagli.innerHTML = `
-                        <input type="number" id="tmp_sku_codice" placeholder="Codice" style="width: 60px;" required>
-                        <input type="text" id="tmp_sku_nome" placeholder="Nome" required>
-                        <input type="text" id="tmp_sku_foto" placeholder="Foto URL" required>
-                        <input type="number" id="tmp_sku_prezzo" placeholder="Prezzo" style="width: 60px;" required>
-                        <input type="text" id="tmp_sku_desc" placeholder="Descrizione" required>
-                        <button id="btnConfermaNuova" style="background:green; color:white;">Crea</button>
-                    `;
-                    areaDettagli.querySelector("#btnConfermaNuova").onclick = () => {
-                        let nuovoCodice = parseInt(areaDettagli.querySelector("#tmp_sku_codice").value);
-                        
-                        // CONTROLLO DI SICUREZZA 1: Esiste già nel DB?
-                        if (self.skusCache.some(s => s.codice === nuovoCodice)) {
-                            alert("Errore: Esiste già una SKU nel catalogo con questo codice.");
-                            return;
-                        }
-                        // CONTROLLO DI SICUREZZA 2: L'ho appena creata in questo nodo?
-                        if (nodoPadre.nuoveSkus.some(s => s.codice === nuovoCodice)) {
-                            alert("Errore: Hai già inserito una Nuova SKU con questo codice.");
-                            return;
-                        }
-
-                        nodoPadre.nuoveSkus.push({
-                            codice: nuovoCodice,
-                            nome: areaDettagli.querySelector("#tmp_sku_nome").value,
-                            foto: areaDettagli.querySelector("#tmp_sku_foto").value,
-                            prezzo: areaDettagli.querySelector("#tmp_sku_prezzo").value,
-                            descrizione: areaDettagli.querySelector("#tmp_sku_desc").value
-                        });
-                        self.disegnaAlberoVisivo();
-                    };
-                };
-            }
-        };
-
-        // salva e manda al server
-		// 4. L'EVENTO FINALE DEL BOTTONE ARANCIONE: SPEDIZIONE AL SERVER!
-        document.getElementById("id_btnSalvaAlberoFinale").addEventListener('click', () => {
-            if (!this.alberoCorrente) return;
-
-            // VALIDAZIONE RIGOROSA DELLE SPECIFICHE PRIMA DI SPEDIRE
-            const validaAlbero = (nodo) => {
-                if (nodo.tipo === "COMPOSTO") {
-                    if (!nodo.figli || nodo.figli.length < 1) {
-                        alert(`ERRORE: Il Prodotto Composto [${nodo.codice}] "${nodo.nome}" deve avere almeno 1 sottoprodotto. Aggiungine altri o rimuovi questo nodo.`);
-                        return false;
-                    }
-                    for (let figlio of nodo.figli) {
-                        if (!validaAlbero(figlio)) return false;
-                    }
-                } else if (nodo.tipo === "SEMPLICE") {
-                    let totaleSkus = (nodo.skus ? nodo.skus.length : 0) + (nodo.nuoveSkus ? nodo.nuoveSkus.length : 0);
-                    if (totaleSkus < 1) {
-                        alert(`ERRORE: Il Prodotto Semplice [${nodo.codice}] "${nodo.nome}" deve avere almeno 1 SKU.`);
-                        return false;
-                    }
-                }
-                return true;
-            };
-
-            // Se la validazione fallisce, fermiamo tutto!
-            if (!validaAlbero(this.alberoCorrente)) {
-                return;
-            }
-            
-            // Impacchettiamo l'intero mostro in JSON
-            var formData = new FormData();
-            formData.append("alberoJSON", JSON.stringify(this.alberoCorrente));
-            formData.append("daEliminareJSON", JSON.stringify(this.nodiDaEliminare));
-			formData.append("relazioniDaEliminareJSON", JSON.stringify(this.relazioniDaEliminare)); 
-
-            makeCall("POST", "SaveAlberoComposto", formData, (req) => {
-                if (req.readyState === XMLHttpRequest.DONE) {
-                    if (req.status === 200) {
-                        this.alertContainer.textContent = "ALBERO SALVATO NEL DATABASE CON SUCCESSO!";
-                        this.alertContainer.style.color = "green";
-                        this.hide(); 
-                        
-                        // Per pulizia, ordiniamo anche un reset delle cache forzando un ricaricamento la prossima volta
-						form.reset();
-						this.loadSkus();
-                        this.loadProdottiDisponibili();
-                    } else {
-                        this.alertContainer.textContent = "Errore salvataggio: " + req.responseText;
-                        this.alertContainer.style.color = "red";
-                    }
-                }
-            });
-        });
- 	}   
-
-    // orchestrator che coordina le varie cose
+    // orchestrator
     function PageOrchestrator() {
         var alertGlobalId = "id_alertGlobal";
 
-        // inizializziamo le varie sezioni della pag
-        this.catalogo = new GestoreCatalogo("sezioneCatalogo", "id_formRicerca", "id_tableRisultatiRicerca", "id_bodyRisultatiRicerca", "id_alertGlobal");
-		
+        this.catalogo = new GestoreCatalogo("sezioneCatalogo", "id_formRicerca", "id_tableRisultatiRicerca", "id_bodyRisultatiRicerca", alertGlobalId);
         this.creazione = new GestoreCreazione("sezioneCreazione", alertGlobalId);
 
+        var self = this;
+
         this.start = function() {
-			
-            // controllo sicurezza lato client
-            let sessionUtente = sessionStorage.getItem('utente');
-            if (!sessionUtente) {
-                window.location.href = "index.html"; // mandiamo a homepage
-                return;
-            }
+            // controllo di sicurezza lato client
+            var sessionUtente = sessionStorage.getItem('utente');
+            if (!sessionUtente) { window.location.href = "index.html"; return; }
             utenteLoggato = JSON.parse(sessionUtente);
-            if (utenteLoggato.ruolo !== "FORNITORE") {
-                window.location.href = "index.html"; // idem
-                return;
-            }
+            if (utenteLoggato.ruolo !== "FORNITORE") { window.location.href = "index.html"; return; }
 
-            // welcome message
-            document.getElementById("id_welcomeMessage").textContent = "Utente: " + utenteLoggato.username;
+			// saluto con nome e cognome
+            document.getElementById("id_welcomeMessage").textContent =
+                "Ciao, " + utenteLoggato.nome + " " + utenteLoggato.cognome;
 
-            // mostrare il catalogo e nascondo il resto
-            document.getElementById("id_btnShowCatalogo").addEventListener('click', () => {
-                this.nascondiTutto();
-                this.catalogo.show();
+            document.getElementById("id_btnShowCatalogo").addEventListener('click', function() {
+                self.nascondiTutto();
+                self.catalogo.show();
             });
 
-			// idem per form creazione
-			document.getElementById("id_btnShowCreazione").addEventListener('click', () => {
-                this.nascondiTutto();
-                this.creazione.show();
+            document.getElementById("id_btnShowCreazione").addEventListener('click', function() {
+                self.nascondiTutto();
+                self.creazione.show();
             });
 
-			// qui direttamente toglie il valore da sessione e manda a home
-			document.getElementById("id_logoutBtn").addEventListener('click', () => {
+            document.getElementById("id_logoutBtn").addEventListener('click', function() {
                 makeCall("GET", "Logout", null, function(req) {
                     if (req.readyState === XMLHttpRequest.DONE) {
-                        // puliamo sessione prima lato server con la call e poi lato client
                         sessionStorage.removeItem('utente');
                         window.location.href = "index.html";
                     }
                 });
             });
 
-			// di default mostriamo i form
+            // di default mostra l'area di creazione
             this.creazione.show();
         };
 
-        // Funzione di servizio per spegnere tutte le viste
         this.nascondiTutto = function() {
             this.catalogo.hide();
             this.creazione.hide();
-			document.getElementById("id_alertGlobal").textContent = ""; // pulisce eventuali messaggi di alert
+            document.getElementById("id_alertGlobal").textContent = "";
         };
     }
 
-    // appena carica la pagina inizializziamo l'orch e lo startiamo
-    window.addEventListener("load", () => {
+    window.addEventListener("load", function() {
         orchestrator = new PageOrchestrator();
         orchestrator.start();
     });

@@ -8,106 +8,140 @@
     <script src="js/fornitore.js" charset="utf-8" defer></script>
 </head>
 <body>
-    <div style="text-align: right; margin: 10px;">
-        <span id="id_welcomeMessage"></span> - <input type="button" id="id_logoutBtn" value="Logout">
+
+    <div class="header-bar">
+        <h1>Dashboard Fornitore</h1>
+        <div>
+            <span id="id_welcomeMessage"></span>
+            <input type="button" id="id_logoutBtn" value="Logout">
+        </div>
     </div>
 
-    <h1>Dashboard Fornitore</h1>
     <div id="id_alertGlobal" class="alertmessage"></div>
 
-    <div style="margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px;">
+    <div class="toolbar">
         <input type="button" id="id_btnShowCreazione" value="Area Creazione (SKU/Prodotti)">
         <input type="button" id="id_btnShowCatalogo" value="Visualizza Catalogo">
     </div>
 
-    <div id="sezioneCreazione" style="display: none; display: flex; gap: 30px; align-items: flex-start;">
-        
-        <div style="flex: 1;">
-            <h2>Crea SKU</h2>
+    <!-- ============ AREA CREAZIONE ============ -->
+    <div id="sezioneCreazione" class="sezione-creazione" hidden=true>
+
+        <!-- colonna: crea SKU -->
+        <div class="column">
+            <h3>Crea SKU</h3>
             <form id="id_formCreaSku" action="#">
-                <fieldset>
-                    Codice: <input type="text" name="codice" required> <br>
-                    Nome: <input type="text" name="nome" required> <br>
-                    Foto: <input type="text" name="foto" required> <br>
-                    Descrizione: <input type="text" name="descrizione" required> <br>
-                    Prezzo: <input type="number" step="0.01" min="0.01" name="prezzo" required> <br>
-                    <input type="button" id="id_submitCreateSku" value="Salva SKU">
-                </fieldset>
+                <div class="form-group">
+                    <label>Codice</label>
+                    <input type="text" name="codice" required>
+                </div>
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" name="nome" required>
+                </div>
+                <div class="form-group">
+                    <label>Foto (URL)</label>
+                    <input type="text" name="foto" required>
+                </div>
+                <div class="form-group">
+                    <label>Descrizione</label>
+                    <input type="text" name="descrizione" required>
+                </div>
+                <div class="form-group">
+                    <label>Prezzo</label>
+                    <input type="number" step="0.01" min="0.01" name="prezzo" required>
+                </div>
+                <input type="button" id="id_submitCreateSku" value="Salva SKU">
             </form>
 
-            <div id="id_dettaglioNuovaSku" style="display: none; margin-top: 20px; padding: 15px; border: 2px dashed #4CAF50;">
-                <h3 style="color: #4CAF50; margin-top:0;">SKU Creata! Clicca sui valori per modificarli:</h3>
+            <div id="id_dettaglioNuovaSku" class="detail-panel panel-sku" hidden=true>
+                <h3>SKU creata! Clicca sui valori per modificarli:</h3>
                 <p><strong>Codice:</strong> <span id="id_skuCodiceDisplay"></span> (non modificabile)</p>
-                <p><strong>Nome:</strong> <span class="editable" data-campo="nome" id="id_skuNomeDisplay"></span></p>
-                <p><strong>Foto:</strong> <span class="editable" data-campo="foto" id="id_skuFotoDisplay"></span></p>
-                <p><strong>Prezzo:</strong> <span class="editable" data-campo="prezzo" id="id_skuPrezzoDisplay"></span></p>
-                <p><strong>Descrizione:</strong> <span class="editable" data-campo="descrizione" id="id_skuDescrizioneDisplay"></span></p>
+                <p><strong>Nome:</strong> <span id="id_skuNomeDisplay"></span></p>
+                <p><strong>Foto:</strong> <span id="id_skuFotoDisplay"></span></p>
+                <p><strong>Prezzo:</strong> <span id="id_skuPrezzoDisplay"></span></p>
+                <p><strong>Descrizione:</strong> <span id="id_skuDescrizioneDisplay"></span></p>
             </div>
         </div>
 
-        <div style="flex: 1;">
-            <h2>Crea Prodotto Semplice</h2>
+        <!-- colonna: crea prodotto semplice -->
+        <div class="column">
+            <h3>Crea Prodotto Semplice</h3>
             <form id="id_formCreaSemplice" action="#">
-                <fieldset>
-                    Codice: <input type="text" name="codice" required> <br>
-                    Nome: <input type="text" name="nome" required> <br>
-                    
-                    <p style="margin-bottom: 2px;">Associa SKU:</p>
-                    <div id="id_menuSkus" style="width: 100%; height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; background: white;">
-                    </div> <br>
-                    
-                    <input type="button" id="id_submitCreateSemplice" value="Salva Prodotto">
-                </fieldset>
+                <div class="form-group">
+                    <label>Codice</label>
+                    <input type="text" name="codice" required>
+                </div>
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" name="nome" required>
+                </div>
+                <div class="form-group">
+                    <label>Associa SKU</label>
+                    <div id="id_menuSkus" class="scroll-box"></div>
+                </div>
+                <input type="button" id="id_submitCreateSemplice" value="Salva Prodotto">
             </form>
 
-            <div id="id_dettaglioNuovoSemplice" style="display: none; margin-top: 20px; padding: 15px; border: 2px dashed #2196F3;">
-                <h3 style="color: #2196F3; margin-top:0;">Prodotto Semplice Creato!</h3>
+            <div id="id_dettaglioNuovoSemplice" class="detail-panel panel-semplice" hidden=true>
+                <h3>Prodotto Semplice creato!</h3>
                 <p><strong>Codice:</strong> <span id="id_sempliceCodiceDisplay"></span></p>
                 <p><strong>Nome:</strong> <span id="id_sempliceNomeDisplay"></span></p>
-                <p><strong>SKU Associate:</strong></p>
-                <ul id="id_sempliceSkusDisplay" style="margin-top: 0;"></ul>
+                <p><strong>SKU associate:</strong></p>
+                <ul id="id_sempliceSkusDisplay"></ul>
             </div>
         </div>
-        
-        <div id="id_costruttoreAlbero" style="display: none; margin-top: 20px; padding: 15px; border: 2px solid #FF9800; background-color: #fff9f0;">
-                <h3 style="color: #FF9800; margin-top:0;">Costruzione Prodotto Composto (Locale)</h3>
-                
-                <div id="id_alberoDisplay" style="margin-bottom: 20px; font-family: monospace; font-size: 14px;">
-                </div>
-                
-                <input type="button" id="id_btnSalvaAlberoFinale" value="SALVA PRODOTTO DEFINITIVO NEL DB" style="background-color: #FF9800; color: white; font-weight: bold; padding: 10px; cursor: pointer; width: 100%;">
-            </div>
 
-        <div style="flex: 1;">
-            <h2>Crea Prodotto Composto</h2>
+        <!-- colonna: crea prodotto composto -->
+        <div class="column">
+            <h3>Crea Prodotto Composto</h3>
             <form id="id_formCreaComposto" action="#">
-                <fieldset>
-                    Codice: <input type="text" name="codice" required> <br>
-                    Nome: <input type="text" name="nome" required> <br>
-                    Prezzo Min: <input type="number" step="0.01" min="0" name="prezzoMin" required> <br>
-                    Prezzo Max: <input type="number" step="0.01" min="0" name="prezzoMax" required> <br>
-                    Descrizione: <input type="text" name="descrizione" required> <br>
-                    
-                    <p style="margin-bottom: 2px;">Associa Sottoprodotti:</p>
-                    <div id="id_menuProdottiDisponibili" style="width: 100%; height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; background: white;">
-                    </div> <br>
-
-                    <input type="button" id="id_submitCreateComposto" value="Salva Prodotto">
-                </fieldset>
+                <div class="form-group">
+                    <label>Codice</label>
+                    <input type="text" name="codice" required>
+                </div>
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" name="nome" required>
+                </div>
+                <div class="form-group">
+                    <label>Prezzo Min</label>
+                    <input type="number" step="0.01" min="0" name="prezzoMin" required>
+                </div>
+                <div class="form-group">
+                    <label>Prezzo Max</label>
+                    <input type="number" step="0.01" min="0" name="prezzoMax" required>
+                </div>
+                <div class="form-group">
+                    <label>Descrizione</label>
+                    <input type="text" name="descrizione" required>
+                </div>
+                <div class="form-group">
+                    <label>Associa Sottoprodotti</label>
+                    <div id="id_menuProdottiDisponibili" class="scroll-box"></div>
+                </div>
+                <input type="button" id="id_submitCreateComposto" value="Salva Prodotto">
             </form>
+        </div>
+
+        <!-- costruttore dell'albero composto (occupa tutta la riga) -->
+        <div id="id_costruttoreAlbero" class="detail-panel panel-composto" hidden=true>
+            <h3>Costruzione Prodotto Composto (locale)</h3>
+            <div id="id_alberoDisplay"></div>
+            <button type="button" id="id_btnSalvaAlberoFinale" class="btn-large">SALVA PRODOTTO DEFINITIVO NEL DB</button>
         </div>
     </div>
 
-    <div id="sezioneCatalogo" style="display: none;">
+    <!-- ============ AREA CATALOGO ============ -->
+    <div id="sezioneCatalogo" class="search-container" hidden=true>
         <h2>Ricerca nel Catalogo</h2>
-        
-        <form id="id_formRicerca" action="#">
-            <input type="text" name="keyword" placeholder="Cerca prodotto o SKU..." required>
-            <input type="button" value="Cerca">
-        </form>
-        <br>
 
-        <table class="boxed" id="id_tableRisultatiRicerca" style="display:none; width: 100%;">
+        <form id="id_formRicerca" class="search-form" action="#">
+            <input type="text" name="keyword" class="search-input" placeholder="Cerca prodotto o SKU..." required>
+            <input type="button" class="search-btn" value="Cerca">
+        </form>
+
+        <table id="id_tableRisultatiRicerca" class="result-table" hidden=true>
             <thead>
                 <tr>
                     <th>Codice</th>
@@ -116,14 +150,13 @@
                     <th>Azioni</th>
                 </tr>
             </thead>
-            <tbody id="id_bodyRisultatiRicerca">
-            </tbody>
+            <tbody id="id_bodyRisultatiRicerca"></tbody>
         </table>
 
-        <div id="id_alberoRicercaArea" style="display: none; margin-top: 20px; padding: 10px; border: 1px solid #4CAF50;">
-            <h3>Dettaglio Albero</h3>
+        <div id="id_alberoRicercaArea" class="detail-panel panel-composto" hidden=true>
+            <h3>Dettaglio</h3>
             <div id="id_alberoRicercaDisplay"></div>
-            <button id="id_btnSalvaModificheRicerca" style="background:orange; margin-top:15px;">Salva Modifiche al Catalogo</button>
+            <button type="button" id="id_btnSalvaModificheRicerca" class="btn-large">Salva Modifiche al Catalogo</button>
         </div>
     </div>
 

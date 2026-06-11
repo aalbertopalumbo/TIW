@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Area Cliente</title>
+    <link rel="stylesheet" type="text/css" media="all" href="css/style.css" />
+    <script src="js/utils.js" charset="utf-8" defer></script>
+    <script src="js/cliente.js" charset="utf-8" defer></script>
+</head>
+<body>
+
+    <div class="header-bar">
+        <h1>Area Cliente</h1>
+        <div>
+            <span id="id_welcomeMessage"></span>
+            <input type="button" id="id_logoutBtn" value="Logout">
+        </div>
+    </div>
+
+    <div id="id_alertGlobal" class="alertmessage"></div>
+
+    <div class="toolbar">
+        <input type="button" id="id_btnShowCatalogo" value="Catalogo">
+        <input type="button" id="id_btnShowConfig" value="Le mie configurazioni">
+    </div>
+
+    <!-- ============ HOME: catalogo prodotti di primo livello ============ -->
+    <div id="sezioneHome" class="main-container" hidden=true>
+        <h2>Catalogo prodotti</h2>
+        <div id="id_listaProdotti"></div>
+        <div id="id_paginazione" class="pagination-container" hidden=true>
+            <button type="button" id="id_btnPrec" class="pagination-btn">&laquo; Precedenti</button>
+            <span id="id_paginaInfo" class="pagination-text"></span>
+            <button type="button" id="id_btnSucc" class="pagination-btn right">Successivi &raquo;</button>
+        </div>
+    </div>
+
+    <!-- ============ SCELTA SKU: configuratore ============ -->
+    <div id="sezioneScelta" class="main-container" hidden=true>
+        <h2 id="id_titoloProdotto"></h2>
+        <div id="id_alberoConfig" class="albero-display"></div>
+        <div class="config-name-box">
+            <label>Nome configurazione</label>
+            <input type="text" id="id_nomeConfig" placeholder="Es. Il mio PC">
+            <button type="button" id="id_btnSalvaConfig" class="btn-large">SALVA CONFIGURAZIONE</button>
+        </div>
+    </div>
+
+    <!-- ============ DETTAGLIO CONFIGURAZIONE ============ -->
+    <div id="sezioneDettaglio" class="main-container" hidden=true>
+        <h2>Dettaglio configurazione</h2>
+        <div id="id_dettaglioConfig"></div>
+    </div>
+
+    <!-- ============ LE MIE CONFIGURAZIONI ============ -->
+    <div id="sezioneConfig" class="main-container" hidden=true>
+        <h2>Le mie configurazioni</h2>
+        <div id="id_listaConfig"></div>
+    </div>
+
+</body>
+</html>

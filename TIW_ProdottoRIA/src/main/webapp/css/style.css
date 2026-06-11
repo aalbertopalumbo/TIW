@@ -485,3 +485,174 @@ button:hover {
     border-radius: 4px;
     min-width: 200px;
 }
+
+/* --- LAYOUT DASHBOARD FORNITORE --- */
+.alertmessage {
+    max-width: 1200px;
+    margin: 15px auto;
+    padding: 0 20px;
+    font-weight: bold;
+}
+
+.toolbar {
+    max-width: 1200px;
+    margin: 0 auto 20px auto;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.toolbar button {
+    width: auto;
+    margin-right: 10px;
+}
+
+.sezione-creazione {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 30px;
+    align-items: flex-start;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.sezione-creazione > .column {
+    flex: 1 1 300px;
+}
+
+/* pannello di dettaglio (oggetto appena creato o albero in costruzione) */
+.detail-panel {
+    margin-top: 20px;
+    padding: 15px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid var(--border-color);
+}
+
+.detail-panel.panel-sku { border-left: 5px solid #28a745; }
+.detail-panel.panel-semplice { border-left: 5px solid #007bff; }
+.detail-panel.panel-composto { border-left: 5px solid #FF9800; }
+
+.result-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.result-table th,
+.result-table td {
+    border: 1px solid var(--border-color);
+    padding: 8px;
+    text-align: left;
+}
+
+.result-table button {
+    width: auto;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    margin: 0;
+}
+
+/* --- EDITOR ALBERO PRODOTTO (componente AlberoProdotto, lato fornitore) --- */
+.albero-toolbar {
+    margin-bottom: 10px;
+}
+
+.albero-toolbar button {
+    width: auto;
+    margin: 0 8px 0 0;
+    padding: 4px 14px;
+    font-size: 0.85rem;
+}
+
+.albero-toolbar button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.albero-display {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    text-align: left;
+}
+
+.albero-nodo {
+    padding: 5px 10px;
+    margin-top: 5px;
+}
+
+/* i nodi figli rientrano e hanno la riga viola a sinistra */
+.albero-nodo.figlio {
+    margin-left: 30px;
+    border-left: 2px dashed #6f42c1;
+}
+
+.albero-riga {
+    margin-bottom: 5px;
+}
+
+/* il valore di un attributo: cliccabile per modificarlo inline */
+.albero-campo {
+    color: #0056b3;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.albero-campo input {
+    width: auto;
+    padding: 2px 4px;
+    font-size: 13px;
+}
+
+.albero-campo input[type="number"] {
+    width: 80px;
+}
+
+/* i bottoni +, -, -* sono piccoli e affiancati (override del button globale a width:100%) */
+.albero-bottoni {
+    margin-left: 12px;
+}
+
+.albero-bottoni button,
+.albero-sku button {
+    width: auto;
+    padding: 2px 8px;
+    margin: 0 0 0 5px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+/* lista delle SKU sotto un prodotto semplice */
+.albero-sku-list {
+    margin: 5px 0 10px 20px;
+    padding-left: 12px;
+    font-size: 13px;
+    list-style: none;
+    border-left: 2px solid #007bff;
+}
+
+.albero-sku {
+    padding: 3px 0;
+}
+
+.albero-sku .nuova {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+/* riquadro del menu "+" (aggiungi sottoprodotto / SKU) */
+.albero-menu {
+    border: 1px solid #FF9800;
+    padding: 10px;
+    margin-top: 5px;
+    background: #fff;
+}
+
+.albero-menu button {
+    width: auto;
+}
+
+.albero-menu .scroll-box {
+    height: 90px;
+    margin: 6px 0;
+}
